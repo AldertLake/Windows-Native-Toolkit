@@ -1,0 +1,23 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Windows Native Toolkit V1.0",
+	"Description": "The Windows Native Toolkit provides Blueprint nodes for accessing native Windows features like hardware info, keyboard layout, message boxes, and file pickers. It streamlines Unreal Engine development by integrating essential system-level functionalities.",
+	"Category": "Other",
+	"CreatedBy": "AldertLake",
+	"CreatedByURL": "http://www.aldertlake.uk/",
+	"DocsURL": "https://aldertlake.uk/UnrealEngine/Plugins/Windows_Native_Toolkit_Documentation.pdf",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EngineVersion": "5.5.0",
+	"CanContainContent": true,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "Hardware_Framework",
+			"Type": "Runtime",
+			"LoadingPhase": "PreLoadingScreen"
+		}
+	]
+}
