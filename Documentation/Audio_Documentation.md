@@ -2,10 +2,10 @@
 This section covers the **Audio System** functions, allowing you to get and set system volume and retrieve the active audio device name.
 
 
-# Features
+## Features
 
 
-## 📌 GetSystemVolume
+### 📌 GetSystemVolume
 Retrieves the current system volume level (range: `0.0` to `1.0`).
 
 ### 🔹 **Usage:**
@@ -17,7 +17,7 @@ UE_LOG(LogTemp, Log, TEXT("Current System Volume: %f"), Volume);
 ```
 ---
 
-## 🎚️ SetSystemVolume
+### 🎚️ SetSystemVolume
 Sets the system volume to a specified level (range: `0.0` to `1.0`).
 
 ### 🔹 **Usage:**
@@ -29,7 +29,7 @@ UE_LOG(LogTemp, Log, TEXT("System Volume Set to 50%%"));
 ```
 ---
 
-## 🎧 GetCurrentAudioDeviceName
+### 🎧 GetCurrentAudioDeviceName
 Retrieves the name of the currently active audio playback device.
 
 ### 🔹 **Usage:**
@@ -49,21 +49,21 @@ UE_LOG(LogTemp, Log, TEXT("Current Audio Device: %s"), *DeviceName);
 
 **Retrieves the current system volume level Float (range: `0.0` to `1.0`).**
 
-![image](https://github.com/user-attachments/assets/6a469517-0884-4eaf-b760-14ef202abc7a)
+<img src="https://github.com/user-attachments/assets/6a469517-0884-4eaf-b760-14ef202abc7a" width="400">
 
 
 ## 🎚️ SetSystemVolume-Blueprint
 
 **Sets the system volume to a specified level Float (range: `0.0` to `1.0`).**
 
-![image](https://github.com/user-attachments/assets/b731a5e7-a5f4-498e-b2c4-b16f8faa85f1)
+<img src="https://github.com/user-attachments/assets/b731a5e7-a5f4-498e-b2c4-b16f8faa85f1" width="400">
 
 
 ## 🎧 GetCurrentAudioDeviceName-Blueprint
 
 **Retrieves the name of the currently active audio playback device As A String.**
 
-![image](https://github.com/user-attachments/assets/1de45d40-a4e7-4e8a-80b1-c0643468ec47)
+<img src="https://github.com/user-attachments/assets/1de45d40-a4e7-4e8a-80b1-c0643468ec47" width="400">
 
 
 
