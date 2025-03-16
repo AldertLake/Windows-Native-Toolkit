@@ -1,6 +1,6 @@
 # Hardware Information Functions (c++ & Blueprint)
 
-The Hardware Section of the Windows Native Toolkit provides essential functions for retrieving detailed system hardware information. These functions allow Unreal Engine developers to access real-time data about the user's machine, including memory, CPU, GPU, and input devices.
+The **Hardware Section** of the Windows Native Toolkit provides essential functions for retrieving detailed system hardware information. These functions allow Unreal Engine developers to access real-time data about the user's machine, including **memory**, **CPU**, **GPU**, and **input devices**.
 
 ## Features
 
