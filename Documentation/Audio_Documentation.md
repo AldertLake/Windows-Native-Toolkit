@@ -1,11 +1,8 @@
-# Windows Native Toolkit - Audio System Functions
-
-## Overview
-The **Windows Native Toolkit** provides Unreal Engine developers with native access to Windows features.  
+# Audio System Functions 
 This section covers the **Audio System** functions, allowing you to get and set system volume and retrieve the active audio device name.
 
 
-# Audio System Functions C++ (Scrool Down For Blueprint)
+# Features
 
 
 ## 📌 GetSystemVolume
