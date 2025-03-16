@@ -68,6 +68,55 @@ void ExampleUsage()
 <img src="https://github.com/user-attachments/assets/85526236-4541-42ce-933d-9489a5303467" width="400">
 
 
+### 📂 How To Specify Allowed Files Extantions ?
+
+**If you want to restrict the Picker to show only one type of file:**
+
+Text Files Only Exemple
+```txt
+Text Files (*.txt)|*.txt
+```
+
+PNG Images Only Exemple
+```txt
+PNG Files (*.png)|*.png
+```
+
+**If you want to allow more than one file type under a single category:**
+
+Text and CSV Files Exemple 
+```txt
+Text and CSV Files (*.txt;*.csv)|*.txt;*.csv
+```
+
+JPEG and PNG Images Exemple
+```txt
+Image Files (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png
+```
+**If you want to provide multiple categories in the file dialog’s dropdown:**
+
+Text Files and Images Separately  
+```txt
+Text Files (*.txt)|*.txt|Image Files (*.png;*.jpg)|*.png;*.jpg
+```
+
+JSON, XML, and All Files 
+```txt
+JSON Files (*.json)|*.json|XML Files (*.xml)|*.xml|All Files (*.*)|*.*
+```
+
+**IIf you want to use a custom label for your file types:**
+
+Custom File Type  
+```txt
+My Custom Files (*.custom)|*.custom
+```
+
+Custom Type with All Files  
+```txt
+My Custom Files (*.custom)|*.custom|All Files (*.*)|*.*
+```
+
 
 
 ## 📂 Move File To Folder - Move Folder To Folder
@@ -103,22 +152,71 @@ and no operations can be performed on it. Also, specifying a path before the loc
 
 
 
-## 📂 Move File To Folder - Move Folder To Folder
+## ⌨️ Get System Languge
 
 **Used to move a folder/file to a specific destination folder, output if operation succes or not and the error code if not.**
 
-**Note: There are some restrictions on file operation. For example, the C:/ drive is severely restricted in Windows, 
-and no operations can be performed on it. Also, specifying a path before the local user folder is not possible due to the lack of administrator privileges.**
-
-<img src="https://github.com/user-attachments/assets/fddf7bdc-e361-4762-b6fe-59dfc9cf512e" width="1050">
+<img src="https://github.com/user-attachments/assets/0b20f0a8-bb71-4f30-9f37-0cdd52480f11" width="400">
 
 
 
 
 
-## 📂 Get File/folder Info
+
+## ⌨️ Get Current Keyboard Layout
 
 **Retrieves if user has charger plugged in or not.**
 
-<img src="https://github.com/user-attachments/assets/7547b2fd-62ab-45a6-9b18-0c40267dd436" width="400">
+<img src="https://github.com/user-attachments/assets/fb6ccd46-e30d-486e-969c-90cdac67d86b" width="400">
+
+Below is a list of common keyboard layout codes that the `GetCurrentKeyboardLayout` function can return on Windows, along with their meanings. These codes represent the active input locale identifier (KLID) for the current thread.
+
+| Layout Code | Language/Region          |
+|-------------|--------------------------|
+| 00000409    | English (United States)  |
+| 00000809    | English (United Kingdom) |
+| 0000040C    | French (France)          |
+| 00000407    | German (Germany)         |
+| 00000410    | Italian (Italy)          |
+| 0000040A    | Spanish (Spain)          |
+| 00000411    | Japanese                 |
+| 00000412    | Korean                   |
+| 00000404    | Chinese (Taiwan)         |
+| 00000804    | Chinese (PRC)            |
+| 00000405    | Czech                    |
+| 00000406    | Danish                   |
+| 00000413    | Dutch (Netherlands)      |
+| 0000040B    | Finnish                  |
+| 00000408    | Greek                    |
+| 0000040E    | Hungarian                |
+| 00000414    | Norwegian (Bokmål)       |
+| 00000415    | Polish                   |
+| 00000416    | Portuguese (Brazil)      |
+| 00000816    | Portuguese (Portugal)    |
+| 00000419    | Russian                  |
+| 0000041D    | Swedish                  |
+| 0000041F    | Turkish                  |
+
+## Variant Keyboard Layouts
+
+Some languages have variant layouts with non-zero variant identifiers. Here are a few examples:
+
+| Layout Code | Language/Region          |
+|-------------|--------------------------|
+| 00010409    | United States-International |
+| 00020409    | United States-Dvorak     |
+| 0001040C    | French (Belgium)         |
+| 00020408    | Greek Latin              |
+| 00010407    | German (IBM)             |
+| 0001040A    | Spanish (Latin America)  |
+
+## Notes
+- **Standard Layouts**: Codes like "00000409" represent the default layout for a language.
+- **Variant Layouts**: Codes like "00010409" indicate alternative layouts for the same language.
+- **Dynamic Output**: The function returns the active layout code, which depends on the user’s current settings and can change (e.g., via Alt+Shift).
+- For a complete list, refer to [Microsoft’s Keyboard Layout Documentation](https://learn.microsoft.com/en-us/windows/win32/intl/keyboard-identifiers-and-input-method-identifiers).
+
+
+
+
 
