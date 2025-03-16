@@ -52,3 +52,19 @@
     Set Refresh Rate
     Get Current Refresh Rate
     Get Supported Refresh Rates
+
+**Open External Apps**
+
+    Open Apps
+    Is App Running
+
+**Notification**
+
+    Toast Notification
+    Cleanup Tray Icon
+
+**Battery Info**
+
+    Get Battery Level
+    Is Charging
+    Has Battery
