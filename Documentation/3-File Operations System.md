@@ -218,5 +218,6 @@ Some languages have variant layouts with non-zero variant identifiers. Here are 
 
 
 
-
+## ⚠️ Limitation
+There is some **limmitation** while using files operations especialy when trying to move or delete an file/folder present in **`C:/`** drive, bcs of **security** reasons, windows sometimes block such operations.
 
