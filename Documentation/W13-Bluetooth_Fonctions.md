@@ -72,3 +72,8 @@ for exemple if you connect firstly an BT mouse then an BT Headset, the BT mouse 
 <img src="https://github.com/user-attachments/assets/3377a5d5-ce8f-4741-b77d-e2c4c3f9cbfc" width="400">
 
 
+## ⚠️ Limitation
+There is some **limmitation** while using this on system with more than One Bluetooth Adapter, to prevent errors and chaos i configured this to only work on **First Bluetooth Adapter**, and cases where player use Two ore more
+bluetooth adapters is very very rare.
+
+
