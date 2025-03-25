@@ -1,3 +1,45 @@
+# Open And Check Apps Feature (c++ & Blueprint)
+
+The **Open And Check Apps Feature** module in Windows Native Toolkit allows Unreal Engine developers to open apps with `.exe` extantions and check if they are running or not.
+
+## Features
+
+### 🔢 Open An Apps By Path
+- `OpenApps()`: Run an app with `.exe` extantion.
+
+### 🔛 Check If App Is Running
+- `IsAppRunning()`: Retrieves if the app process is running or not.  
+
+## Example Usage in C++
+
+```cpp
+#include "OpenApps.h"
+#include "Engine/Engine.h"
+
+void TestOpenApps()
+{
+    FString AppPath = TEXT("C:\\Windows\\System32\\notepad.exe");
+    
+    // Attempt to open Notepad
+    bool bOpened = UOpenApps::OpenApps(AppPath);
+    UE_LOG(LogTemp, Log, TEXT("Open Notepad: %s"), bOpened ? TEXT("Success") : TEXT("Failed"));
+    
+    // Check if Notepad is running
+    bool bIsRunning = UOpenApps::IsAppRunning(AppPath);
+    UE_LOG(LogTemp, Log, TEXT("Is Notepad Running: %s"), bIsRunning ? TEXT("Yes") : TEXT("No"));
+}
+
+// Call this function in your game mode, actor, or any suitable UE5 location (e.g., BeginPlay)
+void AMyActor::BeginPlay()
+{
+    Super::BeginPlay();
+    TestOpenApps();
+}
+
+
+```
+
+
 ---
 
 # Open Apps Functions
