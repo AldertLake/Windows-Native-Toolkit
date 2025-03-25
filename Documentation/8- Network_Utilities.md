@@ -1,74 +1,80 @@
 # 🖥️ Network Utilities
- 
-Le module **Network Utilities** fournit des fonctionnalités réseau essentielles pour **Unreal Engine**, permettant aux développeurs de :  
-✔ Récupérer l'**adresse IP locale**  
-✔ Vérifier la **connexion Internet**  
-✔ Détecter le **type de connexion** (Wi-Fi, Ethernet, etc.)  
+
+The **Network Utilities** module provides essential network functionality for **Unreal Engine**, allowing developers to:
+
+✔ Retrieve the **local IP address**
+
+✔ Check the **internet connection**
+
+✔ Detect the **connection type** (Wi-Fi, Ethernet, etc.)
+
+✔ Check the **Netwrok Adapter Name** (Realtek RTL8852BE WiFi 6 802.11ax PCIe Adapter)
+
+✔ Check the **Wi-Fi Newtork Name SSID** (TP-Link-87839_5G)
 
 
 
 ## 📜 Features
 
-### 🛠️ `GetLocalIpAddress()`  
-**Description:**  
-🔹 Récupère l'**adresse IP locale** de l'ordinateur.  
-🔹 Retourne une **adresse IPv4** au format `FString`.  
-🔹 Si aucune adresse n'est disponible, retourne une chaîne vide.  
+### 🛠️ `GetLocalIpAddress()`
+**Description:**
+🔹 Retrieves the **local IP address** of the computer.
+🔹 Returns an **IPv4 address** in `FString` format.
+🔹 If no address is available, returns an empty string.
 
-**Exemple d'utilisation :**  
+**Example usage:**
 ```cpp
 FString LocalIP = UNetworkUtilities::GetLocalIpAddress();
-UE_LOG(LogTemp, Log, TEXT("Adresse IP Locale : %s"), *LocalIP);
+UE_LOG(LogTemp, Log, TEXT("Local IP Address: %s"), *LocalIP);
 ```
-
 
 ---
 
-### 🛠️ `IsConnectedToInternet()`  
-**Description:**  
-🔹 Vérifie si l'ordinateur est **connecté à Internet**.  
-🔹 Retourne un `bool` :  
-   - `true` → Connexion active  
-   - `false` → Pas d'accès à Internet  
+### 🛠️ `IsConnectedToInternet()`
+**Description:**
+🔹 Checks if the computer is **connected to the Internet**.
+🔹 Returns a `bool`:
+- `true` → Active connection
+- `false` → No Internet access
 
-**Exemple d'utilisation :**  
+**Example usage:**
 ```cpp
 if (UNetworkUtilities::IsConnectedToInternet())
 {
-    UE_LOG(LogTemp, Log, TEXT("L'appareil est connecté à Internet."));
+UE_LOG(LogTemp, Log, TEXT("The device is connected to the Internet."));
 }
 else
 {
-    UE_LOG(LogTemp, Warning, TEXT("Pas de connexion Internet."));
+UE_LOG(LogTemp, Warning, TEXT("No Internet connection."));
 }
 ```
 
-
 ---
 
-### 🛠️ `GetConnectionType()`  
-**Description:**  
-🔹 Identifie le **type de connexion réseau actif** :  
-   - **"Wi-Fi"** → Connexion sans fil  
-   - **"Ethernet"** → Câble réseau  
-   - **"Both"** → Connexion simultanée Wi-Fi + Ethernet  
-   - **"None"** → Aucune connexion réseau détectée  
+### 🛠️ `GetConnectionType()`
+**Description:**
+🔹 Identifies the **active network connection type**:
+- **"Wi-Fi"** → Wireless connection
+- **"Ethernet"** → Network cable
+- **"Both"** → Simultaneous Wi-Fi + Ethernet connection
+- **"None"** → No network connection detected
 
-**Exemple d'utilisation :**  
+**Usage example:**
 ```cpp
 FString ConnectionType = UNetworkUtilities::GetConnectionType();
-UE_LOG(LogTemp, Log, TEXT("Type de connexion : %s"), *ConnectionType);
+UE_LOG(LogTemp, Log, TEXT("Connection type: %s"), *ConnectionType);
 ```
-
 
 ---
 
-## 🛠️ Intégration dans Unreal Engine  
+## 🛠️ Integration into Unreal Engine
 
-1️⃣ **Ajoutez l'en-tête dans votre fichier C++**  
+1️⃣ **Add the header to your C++ file**
 ```cpp
 #include "NetworkUtilities.h"
 ```
+
+---
 
 
 ---
@@ -76,7 +82,7 @@ UE_LOG(LogTemp, Log, TEXT("Type de connexion : %s"), *ConnectionType);
 # Network Utilities In Blueprint
 
 
-## 📌 Get Local Ip Adress
+## 🌐 Get Local Ip Adress
 
 **Retrieves the player local ip adress in forme of string, can be used when building an Co-op mutliplayer local system.**
 
@@ -84,7 +90,7 @@ UE_LOG(LogTemp, Log, TEXT("Type de connexion : %s"), *ConnectionType);
 
 
 
-## 🎚️ Is Connected to internet
+## 🔗 Is Connected to internet
 
 **Retrieves If player has an active internet conection on his PC.**
 
@@ -92,11 +98,27 @@ UE_LOG(LogTemp, Log, TEXT("Type de connexion : %s"), *ConnectionType);
 
 
 
-## 🎧 Get Connection Type
+## 🛜 Get Wifi Network Name
+
+**Output the player `wifi` Network Name AKA SSID.**
+
+<img src="https://github.com/user-attachments/assets/f3570bee-588c-4d0f-8d64-f7ab0261aa2b" width="400">
+
+
+## 🌀 Get Connection Type
 
 **Output the player connection type in forme of string `wifi`, `Ethernet` or `Both`.**
 
 <img src="https://github.com/user-attachments/assets/939af872-2b69-43c9-a382-33d21d95c6a7" width="400">
+
+
+
+## 🆔 Get Active Network Card
+
+**Output the player Network Card `Wirless`, `Ethernet` Name as a  `string`.**
+
+<img src="https://github.com/user-attachments/assets/5e8551ef-3beb-4794-ba39-2c68362e2512" width="400">
+
 
 
 
