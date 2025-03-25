@@ -65,3 +65,11 @@ void ExampleUsage()
 
 <img src="https://github.com/user-attachments/assets/acf377ce-22e0-4a11-8ad3-29483445088e" width="400">
 
+
+## 🎧 Is Fully Charged-Blueprint
+
+**Retrieves if Battery is charged 100% or not.**
+
+<img src="https://github.com/user-attachments/assets/1dc9e640-e5b1-4f39-857c-3bd9512681a0" width="400">
+
+
