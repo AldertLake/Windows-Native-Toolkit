@@ -5,36 +5,31 @@ import random from "random";
 
 const path = "./data.json";
 
-const markCommit = (x, y) => {
-  const date = moment()
-    .subtract(1, "y")
-    .add(1, "d")
-    .add(x, "w")
-    .add(y, "d")
-    .format();
-
-  const data = {
-    date: date,
-  };
-
-  jsonfile.writeFile(path, data, () => {
-    simpleGit().add([path]).commit(date, { "--date": date }).push();
-  });
-};
-
 const makeCommits = (n) => {
-  if(n===0) return simpleGit().push();
-  const x = random.int(0, 54);
-  const y = random.int(0, 6);
-  const date = moment().subtract(1, "y").add(1, "d").add(x, "w").add(y, "d").format();
+  if (n === 0) return simpleGit().push();
+
+  // Define the date range: March 10, 2025 to April 17, 2025
+  const startDate = moment("2025-03-10");
+  const endDate = moment("2025-04-17");
+  
+  // Calculate a random date within the range
+  const dateRange = endDate.diff(startDate, "days");
+  const randomDays = random.int(0, dateRange);
+  const randomDate = startDate.clone().add(randomDays, "days").format();
 
   const data = {
-    date: date,
+    date: randomDate,
   };
-  console.log(date);
+
+  console.log(randomDate);
+
   jsonfile.writeFile(path, data, () => {
-    simpleGit().add([path]).commit(date, { "--date": date },makeCommits.bind(this,--n));
+    simpleGit()
+      .add([path])
+      .commit("Only retards wrote commit title", { "--date": randomDate }, () => {
+        makeCommits(n - 1);
+      });
   });
 };
 
-makeCommits(600);
+makeCommits(1000);
