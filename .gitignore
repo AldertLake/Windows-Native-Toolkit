@@ -1,0 +1,20 @@
+# Ignore Unreal Engine specific files and folders
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Ignore Visual Studio files
+.vs/
+.vscode/
+*.user
+*.userprefs
+
+# Ignore Mac files (if you are on macOS or working cross-platform)
+.DS_Store
+
+# Ignore Unreal Engine project-specific files (if not needed)
+*.suo
+*.sdf
+*.log
