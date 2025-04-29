@@ -1,8 +1,8 @@
 /************************************************************************************
- *																					*
- * Copyright (c) 2025 AldertLake. All Rights Reserved.								*
- * GitHub:	https://github.com/AldertLake/Windows-Native-Toolkit					*
- *																					*
+ *                                                                                  *
+ * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
+ * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                     *
+ *                                                                                  *
  ************************************************************************************/
 
 using System.IO;
@@ -59,9 +59,9 @@ public class Windows_Native_Toolkit : ModuleRules
                 "d3d12.lib",
                 "XInput.lib",
                 "Advapi32.lib",
-                "wbemuuid.lib",  
-                "oleaut32.lib",  
-                "Shell32.lib", 
+                "wbemuuid.lib",
+                "oleaut32.lib",
+                "Shell32.lib",
             });
 
             // Include paths
@@ -71,22 +71,17 @@ public class Windows_Native_Toolkit : ModuleRules
                 Path.Combine(EngineDirectory, "Source/Runtime/D3D12RHI/Public"),
             });
 
-            // Definitions
+            // Definitions (removed conflicting macros)
             PublicDefinitions.AddRange(new string[]
             {
                 "WITH_DX12=1",
-                "D3D12_CORE=1",
-                "WIN32_LEAN_AND_MEAN",
-                "NOMINMAX",
-                "NTDDI_VERSION=NTDDI_WIN10",
-                "_WIN32_WINNT=0x0A00"
+                "D3D12_CORE=1"
             });
         }
 
         // Additional libraries
         PublicAdditionalLibraries.AddRange(new string[]
         {
-
         });
     }
 }
