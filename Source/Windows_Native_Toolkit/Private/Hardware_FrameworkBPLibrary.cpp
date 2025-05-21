@@ -5,10 +5,13 @@
  *                                                                                  *
  ************************************************************************************/
 
-#define _WIN32_WINNT 0x0A00        // Windows 10
-#define NTDDI_VERSION 0x0A000000   // Windows 10
-#define WIN32_LEAN_AND_MEAN        // Reduce Windows header bloat
-#define NOMINMAX                   // Prevent min/max macro conflicts with STL
+ // Only define macros if not already defined to avoid redefinition warnings
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN  // Reduce Windows header bloat
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX  // Prevent min/max macro conflicts with STL
+#endif
 
 #include "Hardware_FrameworkBPLibrary.h"
 #include "Runtime/Core/Public/Windows/WindowsPlatformMisc.h"
@@ -21,7 +24,7 @@
 #include <vector>
 #include "Windows/HideWindowsPlatformTypes.h"
 
- // Memory Information
+// Memory Information
 void USystemInfoBPLibrary::GetMemoryInfo(int32& TotalPhysicalMB, int32& UsedPhysicalMB, int32& FreePhysicalMB,
     int32& TotalVirtualMB, int32& UsedVirtualMB, int32& FreeVirtualMB)
 {
@@ -140,7 +143,7 @@ void USystemInfoBPLibrary::GetGPUInfo(FString& Name, FString& Manufacturer, int3
 
                 // Query VRAM usage (DXGI 1.4)
                 IDXGIAdapter3* pAdapter3 = nullptr;
-                if (SUCCEEDED(pAdapter->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&pAdapter3)))
+                if (SUCCEEDED(pAdapter->QueryInterface(__uuidof(IDXGIFactory), (void**)&pAdapter3)))
                 {
                     DXGI_QUERY_VIDEO_MEMORY_INFO memoryInfo;
                     if (SUCCEEDED(pAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memoryInfo)))

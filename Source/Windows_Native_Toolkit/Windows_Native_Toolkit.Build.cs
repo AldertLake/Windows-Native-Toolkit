@@ -1,87 +1,45 @@
 /************************************************************************************
  *                                                                                  *
  * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
- * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                     *
+ * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
  *                                                                                  *
  ************************************************************************************/
 
-using System.IO;
 using UnrealBuildTool;
 
 public class Windows_Native_Toolkit : ModuleRules
 {
     public Windows_Native_Toolkit(ReadOnlyTargetRules Target) : base(Target)
     {
-        PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        // Include paths
-        PublicIncludePaths.AddRange(new string[] { });
-        PrivateIncludePaths.AddRange(new string[] { });
-        PrivateIncludePaths.Add(Path.Combine(EngineDirectory, "Source/Runtime/Core/Public/Windows"));
-
-        // Dependency modules
+        // Essential Unreal Engine module dependencies
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",
             "CoreUObject",
             "Engine",
-            "InputCore",
-            "Slate",
-            "SlateCore",
-            "DesktopPlatform",
-            "Networking",
-            "Sockets",
-            // GPU VRAM dependencies
-            "D3D11RHI",
-            "D3D12RHI",
-            "DX12"
+            "InputCore",    // For UInputDetectionLibrary
+            "Slate",       // For UFilePickerLibrary (FSlateApplication)
+            "SlateCore"    // Required by Slate
         });
-
-        PrivateDependencyModuleNames.AddRange(new string[]
-        {
-            "CoreUObject",
-            "Engine",
-            "Slate",
-            "SlateCore"
-        });
-
-        // Dynamic modules
-        DynamicallyLoadedModuleNames.AddRange(new string[] { });
 
         // Windows-specific configuration
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            // System libraries
+            // System libraries required by the plugin for various Windows APIs
             PublicSystemLibraries.AddRange(new string[]
             {
-                "dxgi.lib",
-                "d3d11.lib",
-                "d3d12.lib",
-                "XInput.lib",
-                "Advapi32.lib",
-                "wbemuuid.lib",
-                "oleaut32.lib",
-                "Shell32.lib",
-            });
-
-            // Include paths
-            PublicIncludePaths.AddRange(new string[]
-            {
-                Path.Combine(EngineDirectory, "Source/Runtime/Windows/D3D11RHI/Public"),
-                Path.Combine(EngineDirectory, "Source/Runtime/D3D12RHI/Public"),
-            });
-
-            // Definitions (removed conflicting macros)
-            PublicDefinitions.AddRange(new string[]
-            {
-                "WITH_DX12=1",
-                "D3D12_CORE=1"
+                "Winmm.lib",      // Audio device management (UAudioDeviceManager)
+                "XInput.lib",     // Gamepad detection (UInputDetectionLibrary, USystemInfoBPLibrary)
+                "Shell32.lib",    // File operations, notifications, app launching (UFileSystemBlueprintLibrary, UToastNotificationLibrary, UOpenApps)
+                "Comctl32.lib",   // Task dialogs (UMessageBoxWindows)
+                "Advapi32.lib",   // Registry access (USystemInfoBPLibrary)
+                "dxgi.lib",       // GPU information (USystemInfoBPLibrary)
+                "Iphlpapi.lib",   // Network adapters (UNetworkUtilities)
+                "Ws2_32.lib",     // Winsock (UNetworkUtilities)
+                "Wlanapi.lib"     // WLAN APIs (UNetworkUtilities)
             });
         }
-
-        // Additional libraries
-        PublicAdditionalLibraries.AddRange(new string[]
-        {
-        });
     }
 }
