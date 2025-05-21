@@ -1,24 +1,23 @@
 /************************************************************************************
- *																					*
- * Copyright (c) 2025 AldertLake. All Rights Reserved.								*
- * GitHub:	https://github.com/AldertLake/Windows-Native-Toolkit					*
- *																					*
+ *                                                                                  *
+ * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
+ * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
+ *                                                                                  *
  ************************************************************************************/
 
 #include "ToastNotificationLibrary.h"
 #include "Windows/AllowWindowsPlatformTypes.h"
 #include <Windows.h>
 #include <ShellAPI.h>
-#include "Misc/ConfigCacheIni.h" 
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/CoreDelegates.h"
-
 #include "Windows/HideWindowsPlatformTypes.h"
 
 static NOTIFYICONDATAW TrayIconData = { 0 };
 static bool bIsTrayIconInitialized = false;
 bool UToastNotificationLibrary::bIsShutdownRegistered = false;
 
-// Static initialization
+// Registers cleanup callback on application exit
 void UToastNotificationLibrary::StaticInitialize()
 {
     if (!bIsShutdownRegistered)
@@ -31,52 +30,43 @@ void UToastNotificationLibrary::StaticInitialize()
     }
 }
 
-// Static shutdown (just in case we need to manually clean up)
+// Manually cleans up resources (optional)
 void UToastNotificationLibrary::StaticShutdown()
 {
     CleanupTrayIcon();
     bIsShutdownRegistered = false;
 }
 
+// Retrieves the game title from the configuration or uses a fallback
 FString UToastNotificationLibrary::GetGameTitle()
 {
     FString GameTitle;
     GConfig->GetString(TEXT("/Script/EngineSettings.GeneralProjectSettings"), TEXT("ProjectName"), GameTitle, GGameIni);
-    if (GameTitle.IsEmpty())
-    {
-        GameTitle = TEXT("My Unreal Game"); // Fallback title
-    }
-    return GameTitle;
+    return GameTitle.IsEmpty() ? TEXT("My Unreal Game") : GameTitle;
 }
 
+// Displays a tray notification with the specified title, message, and icon type
 void UToastNotificationLibrary::ShowToastNotification(const FString& Title, const FString& Message, EToastIconType IconType)
 {
-    if (!IsRunningOnWindows())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Toast notifications are only supported on Windows."));
-        return;
-    }
-
-    // Register shutdown callback if not already done
-    StaticInitialize();
-
+    StaticInitialize(); // Ensure cleanup is registered
     DisplayTrayNotification(Title, Message, IconType);
 }
 
+// Removes the tray icon from the system tray
 void UToastNotificationLibrary::CleanupTrayIcon()
 {
     if (bIsTrayIconInitialized)
     {
         Shell_NotifyIconW(NIM_DELETE, &TrayIconData);
         bIsTrayIconInitialized = false;
-        ZeroMemory(&TrayIconData, sizeof(NOTIFYICONDATAW)); // Clear the structure to prevent stale data
-        UE_LOG(LogTemp, Log, TEXT("Tray icon cleaned up."));
+        ZeroMemory(&TrayIconData, sizeof(NOTIFYICONDATAW)); // Clear structure to prevent stale data
     }
 }
 
+// Internal implementation of tray notification display
 void UToastNotificationLibrary::DisplayTrayNotification(const FString& Title, const FString& Message, EToastIconType IconType)
 {
-    // Always attempt to clean up any existing tray icon to avoid conflicts
+    // Clean up any existing tray icon to avoid conflicts
     if (bIsTrayIconInitialized)
     {
         Shell_NotifyIconW(NIM_DELETE, &TrayIconData);
@@ -84,38 +74,38 @@ void UToastNotificationLibrary::DisplayTrayNotification(const FString& Title, co
         ZeroMemory(&TrayIconData, sizeof(NOTIFYICONDATAW));
     }
 
-    // Initialize the tray icon
-    HWND hWnd = GetActiveWindow(); // Use the current active window as the owner
+    // Get the active window handle
+    HWND hWnd = GetActiveWindow();
     if (!hWnd)
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to get active window for tray notification."));
-        return;
+        return; // Silently fail if no window is available
     }
 
     // Get the game title for the tooltip
     FString GameTitle = GetGameTitle();
-    std::wstring GameTitleW = std::wstring(GameTitle.GetCharArray().GetData());
+    std::wstring GameTitleW(GameTitle.GetCharArray().GetData());
 
+    // Initialize tray icon data
     TrayIconData.cbSize = sizeof(NOTIFYICONDATAW);
     TrayIconData.hWnd = hWnd;
     TrayIconData.uID = 1; // Unique ID for the tray icon
     TrayIconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_INFO;
     TrayIconData.uCallbackMessage = WM_USER + 1; // Custom message ID
-    TrayIconData.hIcon = LoadIcon(NULL, IDI_APPLICATION); // Default app icon
-    TrayIconData.uTimeout = 5000; // 5 seconds timeout
+    TrayIconData.hIcon = LoadIcon(NULL, IDI_APPLICATION); // Default application icon
+    TrayIconData.uTimeout = 5000; // 5-second timeout
 
-    // Set tooltip to game title (limited to 128 chars)
+    // Set tooltip (limited to 128 characters)
     wcsncpy_s(TrayIconData.szTip, GameTitleW.c_str(), 128);
 
+    // Add the tray icon
     if (!Shell_NotifyIconW(NIM_ADD, &TrayIconData))
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to add tray icon."));
-        return;
+        return; // Silently fail if tray icon creation fails
     }
 
     bIsTrayIconInitialized = true;
 
-    // Set the balloon icon based on the user's choice
+    // Set the balloon icon based on IconType
     switch (IconType)
     {
     case EToastIconType::Warning:
@@ -130,25 +120,10 @@ void UToastNotificationLibrary::DisplayTrayNotification(const FString& Title, co
         break;
     }
 
-    // Update the notification with title and message
+    // Set title and message (with length limits)
     wcsncpy_s(TrayIconData.szInfoTitle, *Title, 64); // Title limited to 64 chars
     wcsncpy_s(TrayIconData.szInfo, *Message, 256);   // Message limited to 256 chars
 
-    if (!Shell_NotifyIconW(NIM_MODIFY, &TrayIconData))
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to show tray notification."));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Tray notification shown: %s - %s"), *Title, *Message);
-    }
-}
-
-bool UToastNotificationLibrary::IsRunningOnWindows()
-{
-#if PLATFORM_WINDOWS
-    return true;
-#else
-    return false;
-#endif
+    // Show the notification
+    Shell_NotifyIconW(NIM_MODIFY, &TrayIconData);
 }

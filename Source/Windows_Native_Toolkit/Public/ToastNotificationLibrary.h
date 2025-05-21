@@ -1,10 +1,3 @@
-/************************************************************************************
- *																					*
- * Copyright (c) 2025 AldertLake. All Rights Reserved.								*
- * GitHub:	https://github.com/AldertLake/Windows-Native-Toolkit					*
- *																					*
- ************************************************************************************/
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -19,17 +12,29 @@ enum class EToastIconType : uint8
     Error       UMETA(DisplayName = "Error")       // Error (red X)
 };
 
+/**
+ * Blueprint function library for displaying Windows system tray notifications.
+ * Provides functions to show notifications and clean up the tray icon.
+ * Note: This library is designed exclusively for Windows platforms.
+ */
 UCLASS()
-class UToastNotificationLibrary : public UBlueprintFunctionLibrary
+class WINDOWS_NATIVE_TOOLKIT_API UToastNotificationLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
-    // Displays a system tray notification with a title, message, and customizable icon
+    /**
+     * Displays a system tray notification with a title, message, and customizable icon.
+     * @param Title The title of the notification (max 64 characters).
+     * @param Message The message body of the notification (max 256 characters).
+     * @param IconType The type of icon to display (Info, Warning, Error).
+     */
     UFUNCTION(BlueprintCallable, Category = "Toast Notification")
     static void ShowToastNotification(const FString& Title, const FString& Message, EToastIconType IconType = EToastIconType::Info);
 
-    // Cleans up the system tray icon (call this when shutting down or as needed)
+    /**
+     * Removes the system tray icon. Automatically called on application exit, but can be invoked manually if needed.
+     */
     UFUNCTION(BlueprintCallable, Category = "Toast Notification")
     static void CleanupTrayIcon();
 
@@ -37,25 +42,13 @@ private:
     // Internal helper to initialize and show the tray notification
     static void DisplayTrayNotification(const FString& Title, const FString& Message, EToastIconType IconType);
 
-    // Platform check helper
-    static bool IsRunningOnWindows();
-
-    // Helper to get the game title
+    // Helper to get the game title from configuration
     static FString GetGameTitle();
 
     // Static initialization and cleanup for the library
     static void StaticInitialize();
     static void StaticShutdown();
 
-    // Register shutdown callback
+    // Tracks whether shutdown callback is registered
     static bool bIsShutdownRegistered;
 };
-
-
-
-
-
-
-
-
-
