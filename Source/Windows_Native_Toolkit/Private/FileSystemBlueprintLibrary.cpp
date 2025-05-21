@@ -1,18 +1,32 @@
-/************************************************************************************
- *																					*
- * Copyright (c) 2025 AldertLake. All Rights Reserved.								*
- * GitHub:	https://github.com/AldertLake/Windows-Native-Toolkit					*
- *																					*
- ************************************************************************************/
-
 #include "FileSystemBlueprintLibrary.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 
-// these are allow and hide windows platform types
-#include "Windows/AllowWindowsPlatformTypes.h"
-#include <windows.h>
-#include "Windows/HideWindowsPlatformTypes.h" 
+// Helper to validate and normalize paths
+static bool ValidatePath(const FString& Path, bool bIsDirectory, FString& OutNormalizedPath, FString& OutErrorMessage)
+{
+    if (Path.IsEmpty())
+    {
+        OutErrorMessage = TEXT("Path is empty.");
+        return false;
+    }
+
+    OutNormalizedPath = FPaths::ConvertRelativePathToFull(Path);
+    FPaths::NormalizeFilename(OutNormalizedPath);
+
+    if (bIsDirectory && !FPaths::DirectoryExists(OutNormalizedPath))
+    {
+        OutErrorMessage = FString::Printf(TEXT("Directory does not exist: %s"), *OutNormalizedPath);
+        return false;
+    }
+    else if (!bIsDirectory && !FPaths::FileExists(OutNormalizedPath))
+    {
+        OutErrorMessage = FString::Printf(TEXT("File does not exist: %s"), *OutNormalizedPath);
+        return false;
+    }
+
+    return true;
+}
 
 bool UFileSystemBlueprintLibrary::MoveFileToFolder(
     const FString& SourceFilePath,
@@ -23,24 +37,30 @@ bool UFileSystemBlueprintLibrary::MoveFileToFolder(
     bSuccess = false;
     OutErrorMessage.Empty();
 
-    if (!FPaths::FileExists(SourceFilePath))
+    FString NormalizedSource, NormalizedDestFolder;
+    if (!ValidatePath(SourceFilePath, false, NormalizedSource, OutErrorMessage) ||
+        !ValidatePath(DestinationFolderPath, true, NormalizedDestFolder, OutErrorMessage))
     {
-        OutErrorMessage = FString::Printf(TEXT("Source file does not exist: %s"), *SourceFilePath);
         return false;
     }
 
-    if (!FPaths::DirectoryExists(DestinationFolderPath))
+    // Create destination folder if it doesn't exist
+    if (!FPaths::DirectoryExists(NormalizedDestFolder))
     {
-        IFileManager::Get().MakeDirectory(*DestinationFolderPath, true);
+        if (!IFileManager::Get().MakeDirectory(*NormalizedDestFolder, true))
+        {
+            OutErrorMessage = FString::Printf(TEXT("Failed to create directory: %s"), *NormalizedDestFolder);
+            return false;
+        }
     }
 
-    FString FileName = FPaths::GetCleanFilename(SourceFilePath);
-    FString DestinationPath = FPaths::Combine(DestinationFolderPath, FileName);
+    FString FileName = FPaths::GetCleanFilename(NormalizedSource);
+    FString DestinationPath = FPaths::Combine(NormalizedDestFolder, FileName);
 
-    bSuccess = IFileManager::Get().Move(*DestinationPath, *SourceFilePath, true, true);
+    bSuccess = IFileManager::Get().Move(*DestinationPath, *NormalizedSource, true, true);
     if (!bSuccess)
     {
-        OutErrorMessage = FString::Printf(TEXT("Failed to move file from %s to %s"), *SourceFilePath, *DestinationPath);
+        OutErrorMessage = FString::Printf(TEXT("Failed to move file from %s to %s"), *NormalizedSource, *DestinationPath);
     }
 
     return bSuccess;
@@ -54,28 +74,19 @@ bool UFileSystemBlueprintLibrary::DeleteFileW(
     bSuccess = false;
     OutErrorMessage.Empty();
 
-    if (FilePath.IsEmpty())
+    FString NormalizedPath;
+    if (!ValidatePath(FilePath, false, NormalizedPath, OutErrorMessage))
     {
-        OutErrorMessage = TEXT("Invalid file path.");
         return false;
     }
 
-    if (!FPaths::FileExists(FilePath))
+    bSuccess = IFileManager::Get().Delete(*NormalizedPath, false, true, true);
+    if (!bSuccess)
     {
-        OutErrorMessage = TEXT("File does not exist.");
-        return false;
+        OutErrorMessage = FString::Printf(TEXT("Failed to delete file: %s"), *NormalizedPath);
     }
 
-    if (::DeleteFileW(*FilePath))
-    {
-        bSuccess = true;
-        return true;
-    }
-    else
-    {
-        OutErrorMessage = TEXT("Failed to delete the file.");
-        return false;
-    }
+    return bSuccess;
 }
 
 bool UFileSystemBlueprintLibrary::GetFileInfo(
@@ -86,23 +97,24 @@ bool UFileSystemBlueprintLibrary::GetFileInfo(
 {
     bSuccess = false;
     OutErrorMessage.Empty();
+    OutFileInfo = FFileInfo();
 
-    if (!FPaths::FileExists(FilePath))
+    FString NormalizedPath;
+    if (!ValidatePath(FilePath, false, NormalizedPath, OutErrorMessage))
     {
-        OutErrorMessage = FString::Printf(TEXT("File does not exist: %s"), *FilePath);
         return false;
     }
 
-    FFileStatData FileStat = IFileManager::Get().GetStatData(*FilePath);
+    FFileStatData FileStat = IFileManager::Get().GetStatData(*NormalizedPath);
     if (FileStat.bIsValid)
     {
         OutFileInfo.FileSize = FileStat.FileSize;
-        OutFileInfo.CreationTime = FileStat.CreationTime; // the get file info in generale is unstable sometimes it gives random errors lol.
+        OutFileInfo.CreationTime = FileStat.CreationTime;
         bSuccess = true;
     }
     else
     {
-        OutErrorMessage = FString::Printf(TEXT("Failed to get file info: %s"), *FilePath);
+        OutErrorMessage = FString::Printf(TEXT("Failed to get file info: %s"), *NormalizedPath);
     }
 
     return bSuccess;
@@ -117,24 +129,30 @@ bool UFileSystemBlueprintLibrary::MoveFolderToFolder(
     bSuccess = false;
     OutErrorMessage.Empty();
 
-    if (!FPaths::DirectoryExists(SourceFolderPath))
+    FString NormalizedSource, NormalizedDestFolder;
+    if (!ValidatePath(SourceFolderPath, true, NormalizedSource, OutErrorMessage) ||
+        !ValidatePath(DestinationFolderPath, true, NormalizedDestFolder, OutErrorMessage))
     {
-        OutErrorMessage = FString::Printf(TEXT("Source folder does not exist: %s"), *SourceFolderPath);
         return false;
     }
 
-    if (!FPaths::DirectoryExists(DestinationFolderPath))
+    // Create destination folder if it doesn't exist
+    if (!FPaths::DirectoryExists(NormalizedDestFolder))
     {
-        IFileManager::Get().MakeDirectory(*DestinationFolderPath, true);
+        if (!IFileManager::Get().MakeDirectory(*NormalizedDestFolder, true))
+        {
+            OutErrorMessage = FString::Printf(TEXT("Failed to create directory: %s"), *NormalizedDestFolder);
+            return false;
+        }
     }
 
-    FString FolderName = FPaths::GetBaseFilename(SourceFolderPath);
-    FString DestinationPath = FPaths::Combine(DestinationFolderPath, FolderName);
+    FString FolderName = FPaths::GetBaseFilename(NormalizedSource);
+    FString DestinationPath = FPaths::Combine(NormalizedDestFolder, FolderName);
 
-    bSuccess = IFileManager::Get().Move(*DestinationPath, *SourceFolderPath, true, true);
+    bSuccess = IFileManager::Get().Move(*DestinationPath, *NormalizedSource, true, true);
     if (!bSuccess)
     {
-        OutErrorMessage = FString::Printf(TEXT("Failed to move folder from %s to %s"), *SourceFolderPath, *DestinationPath);
+        OutErrorMessage = FString::Printf(TEXT("Failed to move folder from %s to %s"), *NormalizedSource, *DestinationPath);
     }
 
     return bSuccess;
@@ -148,16 +166,16 @@ bool UFileSystemBlueprintLibrary::DeleteFolder(
     bSuccess = false;
     OutErrorMessage.Empty();
 
-    if (!FPaths::DirectoryExists(FolderPath))
+    FString NormalizedPath;
+    if (!ValidatePath(FolderPath, true, NormalizedPath, OutErrorMessage))
     {
-        OutErrorMessage = FString::Printf(TEXT("Folder does not exist: %s"), *FolderPath);
         return false;
     }
 
-    bSuccess = IFileManager::Get().DeleteDirectory(*FolderPath, false, true);
+    bSuccess = IFileManager::Get().DeleteDirectory(*NormalizedPath, false, true);
     if (!bSuccess)
     {
-        OutErrorMessage = FString::Printf(TEXT("Failed to delete folder: %s"), *FolderPath);
+        OutErrorMessage = FString::Printf(TEXT("Failed to delete folder: %s"), *NormalizedPath);
     }
 
     return bSuccess;
@@ -171,23 +189,25 @@ bool UFileSystemBlueprintLibrary::GetFolderInfo(
 {
     bSuccess = false;
     OutErrorMessage.Empty();
+    OutFolderInfo = FFileInfo();
 
-    if (!FPaths::DirectoryExists(FolderPath))
+    FString NormalizedPath;
+    if (!ValidatePath(FolderPath, true, NormalizedPath, OutErrorMessage))
     {
-        OutErrorMessage = FString::Printf(TEXT("Folder does not exist: %s"), *FolderPath);
         return false;
     }
 
-    FFileStatData FolderStat = IFileManager::Get().GetStatData(*FolderPath);
+    FFileStatData FolderStat = IFileManager::Get().GetStatData(*NormalizedPath);
     if (FolderStat.bIsValid)
     {
         TArray<FString> FileNames;
-        IFileManager::Get().FindFilesRecursive(FileNames, *FolderPath, TEXT("*.*"), true, false);
+        IFileManager::Get().FindFilesRecursive(FileNames, *NormalizedPath, TEXT("*.*"), true, false);
 
         int64 TotalSize = 0;
         for (const FString& File : FileNames)
         {
-            FFileStatData FileStat = IFileManager::Get().GetStatData(*File);
+            FString FullFilePath = FPaths::Combine(NormalizedPath, File);
+            FFileStatData FileStat = IFileManager::Get().GetStatData(*FullFilePath);
             if (FileStat.bIsValid)
             {
                 TotalSize += FileStat.FileSize;
@@ -200,7 +220,7 @@ bool UFileSystemBlueprintLibrary::GetFolderInfo(
     }
     else
     {
-        OutErrorMessage = FString::Printf(TEXT("Failed to get folder info: %s"), *FolderPath);
+        OutErrorMessage = FString::Printf(TEXT("Failed to get folder info: %s"), *NormalizedPath);
     }
 
     return bSuccess;
