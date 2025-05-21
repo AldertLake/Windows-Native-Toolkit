@@ -1,14 +1,15 @@
 ﻿/************************************************************************************
- *																					*
- * Copyright (c) 2025 AldertLake. All Rights Reserved.								*
- * GitHub:	https://github.com/AldertLake/Windows-Native-Toolkit					*
- *																					*
+ *                                                                                  *
+ * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
+ * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
+ *                                                                                  *
  ************************************************************************************/
 
 #include "MessageBoxWindows.h"
 #include "Windows/WindowsHWrapper.h"
 #include "Windows/AllowWindowsPlatformTypes.h"
 #include <CommCtrl.h>
+#include "Windows/HideWindowsPlatformTypes.h"
 
 FMessageBoxResult UMessageBoxWindows::ShowMessageBox(
     const FString& Title,
@@ -20,23 +21,23 @@ FMessageBoxResult UMessageBoxWindows::ShowMessageBox(
 {
     FMessageBoxResult Result;
 
-    // convertir FString en wide string
-    const FString WideTitle = Title;
-    const FString WideContent = Content;
-    const FString WideFirstButton = FirstButtonText;
-    const FString WideSecondButton = SecondButtonText;
+    // Convert FString to wide strings directly
+    const TCHAR* WideTitle = *Title;
+    const TCHAR* WideContent = *Content;
+    const TCHAR* WideFirstButton = *FirstButtonText;
+    const TCHAR* WideSecondButton = *SecondButtonText;
 
-    // Set up du task dialog configuration
+    // Set up task dialog configuration
     TASKDIALOGCONFIG config = { 0 };
     config.cbSize = sizeof(config);
     config.hwndParent = nullptr;
     config.dwFlags = TDF_POSITION_RELATIVE_TO_WINDOW;
 
-    // Set du title et du content
-    config.pszWindowTitle = *WideTitle;
-    config.pszMainInstruction = *WideContent;
+    // Set title and content
+    config.pszWindowTitle = WideTitle;
+    config.pszMainInstruction = WideContent;
 
-    // Set de L'icon
+    // Set icon based on IconType
     switch (IconType)
     {
     case EMessageBoxIcon::Information:
@@ -57,16 +58,17 @@ FMessageBoxResult UMessageBoxWindows::ShowMessageBox(
         break;
     }
 
+    // Configure buttons
     TASKDIALOG_BUTTON buttons[2];
     int buttonCount = bShowSecondButton ? 2 : 1;
 
     buttons[0].nButtonID = 100;  // Custom ID for first button
-    buttons[0].pszButtonText = *WideFirstButton;
+    buttons[0].pszButtonText = WideFirstButton;
 
     if (bShowSecondButton)
     {
         buttons[1].nButtonID = 101;  // Custom ID for second button
-        buttons[1].pszButtonText = *WideSecondButton;
+        buttons[1].pszButtonText = WideSecondButton;
     }
 
     config.pButtons = buttons;
@@ -81,15 +83,15 @@ FMessageBoxResult UMessageBoxWindows::ShowMessageBox(
     {
         switch (nButtonPressed)
         {
-        case 100:  // First button ID
+        case 100:  // First button pressed
             Result.bFirstButtonPressed = true;
             Result.bWasClosedWithoutSelection = false;
             break;
-        case 101:  // Second button ID
+        case 101:  // Second button pressed
             Result.bFirstButtonPressed = false;
             Result.bWasClosedWithoutSelection = false;
             break;
-        case 0:    // Dialog closed
+        case 0:    // Dialog closed without selection (e.g., via close button)
             Result.bFirstButtonPressed = false;
             Result.bWasClosedWithoutSelection = true;
             break;
@@ -97,11 +99,10 @@ FMessageBoxResult UMessageBoxWindows::ShowMessageBox(
     }
     else
     {
+        // Handle failure to create dialog (e.g., invalid parameters or system error)
         Result.bFirstButtonPressed = false;
         Result.bWasClosedWithoutSelection = true;
     }
 
     return Result;
 }
-
-#include "Windows/HideWindowsPlatformTypes.h"
