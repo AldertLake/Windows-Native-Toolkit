@@ -1,16 +1,13 @@
-/************************************************************************************
- *																					*
- * Copyright (c) 2025 AldertLake. All Rights Reserved.								*
- * GitHub:	https://github.com/AldertLake/Windows-Native-Toolkit					*
- *																					*
- ************************************************************************************/
-
 #include "FilePickerLibrary.h"
 #include "DesktopPlatformModule.h"
 #include "Misc/Paths.h"
-#include "Framework\Application\SlateApplication.h"
-#include <Windows.h> 
+#include "Framework/Application/SlateApplication.h"
 
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <windows.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
 
 bool UFilePickerLibrary::OpenFileFolderPicker(
     EFilePickerType PickerType,
@@ -18,10 +15,11 @@ bool UFilePickerLibrary::OpenFileFolderPicker(
     const FString& AllowedFileExtensions,
     FString& OutSelectedPath)
 {
+    OutSelectedPath.Empty();
+
     IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
     if (!DesktopPlatform)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DesktopPlatform module not available."));
         return false;
     }
 
@@ -30,8 +28,8 @@ bool UFilePickerLibrary::OpenFileFolderPicker(
 
     if (PickerType == EFilePickerType::File)
     {
-        TArray<FString> OutFiles;
         FString FileTypeFilter = bAllFilesTypeSupported ? TEXT("All Files (*.*)|*.*") : AllowedFileExtensions;
+        TArray<FString> OutFiles;
 
         bool bSuccess = DesktopPlatform->OpenFileDialog(
             ParentWindowHandle,
@@ -52,7 +50,7 @@ bool UFilePickerLibrary::OpenFileFolderPicker(
             return false;
         }
     }
-    else 
+    else
     {
         bool bSuccess = DesktopPlatform->OpenDirectoryDialog(
             ParentWindowHandle,
@@ -71,44 +69,34 @@ bool UFilePickerLibrary::OpenFileFolderPicker(
     return true;
 }
 
-
 FString UFilePickerLibrary::GetCurrentKeyboardLayout()
 {
-
-    TCHAR KeyboardLayoutName[KL_NAMELENGTH];
-    if (GetKeyboardLayoutName(KeyboardLayoutName))
+#if PLATFORM_WINDOWS
+    TCHAR KeyboardLayoutName[KL_NAMELENGTH] = { 0 };
+    if (GetKeyboardLayoutName(KeyboardLayoutName) && KeyboardLayoutName[0])
     {
-     
         return FString(KeyboardLayoutName);
     }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to retrieve keyboard layout."));
-        return FString(TEXT("Unknown"));
-    }
+    return FString(TEXT("Unknown"));
+#else
+    return FString(TEXT("Unknown"));
+#endif
 }
-
 
 FString UFilePickerLibrary::GetSystemLanguage()
 {
- 
+#if PLATFORM_WINDOWS
     LANGID LangID = GetSystemDefaultLangID();
     if (LangID != 0)
     {
-       
-        WCHAR LocaleName[LOCALE_NAME_MAX_LENGTH];
-        if (LCIDToLocaleName(MAKELCID(LangID, SORT_DEFAULT), LocaleName, LOCALE_NAME_MAX_LENGTH, 0))
+        WCHAR LocaleName[LOCALE_NAME_MAX_LENGTH] = { 0 };
+        if (LCIDToLocaleName(MAKELCID(LangID, SORT_DEFAULT), LocaleName, LOCALE_NAME_MAX_LENGTH, 0) && LocaleName[0])
         {
-           
             return FString(LocaleName);
         }
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Failed to retrieve system language."));
     return FString(TEXT("Unknown"));
+#else
+    return FString(TEXT("Unknown"));
+#endif
 }
-
-
-
-
-

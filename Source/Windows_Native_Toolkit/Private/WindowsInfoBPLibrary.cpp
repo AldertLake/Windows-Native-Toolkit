@@ -1,120 +1,155 @@
-/************************************************************************************
- *																					*
- * Copyright (c) 2025 AldertLake. All Rights Reserved.								*
- * GitHub:	https://github.com/AldertLake/Windows-Native-Toolkit					*
- *																					*
- ************************************************************************************/
-
-#include "WINDOWSInfoBPLibrary.h"
+#include "WindowsInfoBPLibrary.h"
 #include "Windows/AllowWindowsPlatformTypes.h"
 #include "Windows/WindowsPlatformMisc.h"
-#include <Lmcons.h>
+#include <lmcons.h>
 #include <winreg.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 
-FString UWINDOWSInfoBPLibrary::GetWindowsVersion()
+// RAII wrapper for HKEY
+struct FRegistryKeyPtr
 {
-    FString VersionName;
+    HKEY Key = nullptr;
+    FRegistryKeyPtr() = default;
+    explicit FRegistryKeyPtr(HKEY InKey) : Key(InKey) {}
+    ~FRegistryKeyPtr() { if (Key) RegCloseKey(Key); }
+    HKEY* operator&() { return &Key; }
+    bool IsValid() const { return Key != nullptr; }
+};
 
-    // Use Unreal's built-in version detection
+FString UWindowsInfoBPLibrary::GetWindowsVersion()
+{
+#if PLATFORM_WINDOWS
+    // Use Unreal's built-in version detection first
     FString OSVersion = FPlatformMisc::GetOSVersion();
-
     if (OSVersion.Contains(TEXT("Windows 11")))
     {
-        VersionName = TEXT("Windows 11");
+        return TEXT("Windows 11");
     }
-    else if (OSVersion.Contains(TEXT("Windows 10")))
+    if (OSVersion.Contains(TEXT("Windows 10")))
     {
-        VersionName = TEXT("Windows 10");
+        return TEXT("Windows 10");
     }
-    else
-    {
-        // Fallback to registry for older versions
-        const uint32 MajorVersion = ReadRegistryDWORD(
-            TEXT("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"),
-            TEXT("CurrentMajorVersionNumber")
-        );
 
-        if (MajorVersion == 6)
+    // Fallback to registry for older versions
+    FRegistryKeyPtr hKey;
+    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    {
+        uint32 MajorVersion = 0;
+        DWORD Size = sizeof(DWORD);
+        if (RegQueryValueEx(hKey.Key, TEXT("CurrentMajorVersionNumber"), nullptr, nullptr, reinterpret_cast<LPBYTE>(&MajorVersion), &Size) == ERROR_SUCCESS)
         {
-            const uint32 MinorVersion = ReadRegistryDWORD(
-                TEXT("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"),
-                TEXT("CurrentMinorVersionNumber")
-            );
-
-            if (MinorVersion == 1) VersionName = TEXT("Windows 7");
-            else if (MinorVersion == 2) VersionName = TEXT("Windows 8");
-            else if (MinorVersion == 3) VersionName = TEXT("Windows 8.1");
+            if (MajorVersion == 6)
+            {
+                uint32 MinorVersion = 0;
+                Size = sizeof(DWORD);
+                if (RegQueryValueEx(hKey.Key, TEXT("CurrentMinorVersionNumber"), nullptr, nullptr, reinterpret_cast<LPBYTE>(&MinorVersion), &Size) == ERROR_SUCCESS)
+                {
+                    if (MinorVersion == 1) return TEXT("Windows 7");
+                    if (MinorVersion == 2) return TEXT("Windows 8");
+                    if (MinorVersion == 3) return TEXT("Windows 8.1");
+                }
+            }
         }
     }
-
-    return VersionName.IsEmpty() ? OSVersion : VersionName;
+    return OSVersion.IsEmpty() ? TEXT("Unknown") : OSVersion;
+#else
+    return FPlatformMisc::GetOSVersion();
+#endif
 }
 
-FString UWINDOWSInfoBPLibrary::GetWindowsBuild()
+FString UWindowsInfoBPLibrary::GetWindowsBuild()
 {
-    return ReadRegistryString(
-        TEXT("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"),
-        TEXT("CurrentBuildNumber")
-    ) + TEXT(".") + FString::FromInt(ReadRegistryDWORD(
-        TEXT("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"),
-        TEXT("UBR")
-    ));
+#if PLATFORM_WINDOWS
+    FRegistryKeyPtr hKey;
+    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    {
+        TCHAR Buffer[32] = { 0 }; // Fixed-size buffer for small strings
+        DWORD Size = sizeof(Buffer);
+        FString BuildNumber;
+        if (RegQueryValueEx(hKey.Key, TEXT("CurrentBuildNumber"), nullptr, nullptr, reinterpret_cast<LPBYTE>(Buffer), &Size) == ERROR_SUCCESS)
+        {
+            BuildNumber = Buffer;
+        }
+
+        uint32 UBR = 0;
+        Size = sizeof(DWORD);
+        if (RegQueryValueEx(hKey.Key, TEXT("UBR"), nullptr, nullptr, reinterpret_cast<LPBYTE>(&UBR), &Size) == ERROR_SUCCESS)
+        {
+            return BuildNumber + TEXT(".") + FString::FromInt(UBR);
+        }
+        return BuildNumber.IsEmpty() ? TEXT("Unknown") : BuildNumber;
+    }
+    return TEXT("Unknown");
+#else
+    return TEXT("Unknown");
+#endif
 }
 
-FString UWINDOWSInfoBPLibrary::GetWindowsEdition()
+FString UWindowsInfoBPLibrary::GetWindowsEdition()
 {
-    return ReadRegistryString(
-        TEXT("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"),
-        TEXT("EditionID")
-    );
+#if PLATFORM_WINDOWS
+    FString Edition = ReadRegistryString(TEXT("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"), TEXT("EditionID"));
+    return Edition.IsEmpty() ? TEXT("Unknown") : Edition;
+#else
+    return TEXT("Unknown");
+#endif
 }
 
-FString UWINDOWSInfoBPLibrary::GetPCName()
+FString UWindowsInfoBPLibrary::GetPCName()
 {
-    return FPlatformProcess::ComputerName();
+    FString ComputerName = FPlatformProcess::ComputerName();
+    return ComputerName.IsEmpty() ? TEXT("Unknown") : ComputerName;
 }
 
-FString UWINDOWSInfoBPLibrary::GetLocalUserName()
+FString UWindowsInfoBPLibrary::GetLocalUserName()
 {
-    return FPlatformProcess::UserName();
+    FString UserName = FPlatformProcess::UserName();
+    return UserName.IsEmpty() ? TEXT("Unknown") : UserName;
 }
 
-FString UWINDOWSInfoBPLibrary::ReadRegistryString(const FString& KeyPath, const FString& ValueName, bool bLocalMachine)
+FString UWindowsInfoBPLibrary::ReadRegistryString(const FString& KeyPath, const FString& ValueName, bool bLocalMachine)
 {
+#if PLATFORM_WINDOWS
     FString Result;
     HKEY RootKey = bLocalMachine ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-    HKEY hKey;
+    FRegistryKeyPtr hKey;
 
     if (RegOpenKeyEx(RootKey, *KeyPath, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
         DWORD Type, Size;
-        if (RegQueryValueEx(hKey, *ValueName, nullptr, &Type, nullptr, &Size) == ERROR_SUCCESS && Type == REG_SZ)
+        if (RegQueryValueEx(hKey.Key, *ValueName, nullptr, &Type, nullptr, &Size) == ERROR_SUCCESS && Type == REG_SZ)
         {
-            TArray<TCHAR> Buffer;
-            Buffer.SetNum(Size / sizeof(TCHAR));
-            if (RegQueryValueEx(hKey, *ValueName, nullptr, nullptr, reinterpret_cast<LPBYTE>(Buffer.GetData()), &Size) == ERROR_SUCCESS)
+            TCHAR Buffer[256] = { 0 }; // Fixed-size buffer for typical registry strings
+            if (RegQueryValueEx(hKey.Key, *ValueName, nullptr, nullptr, reinterpret_cast<LPBYTE>(Buffer), &Size) == ERROR_SUCCESS && Buffer[0])
             {
-                Result = FString(Buffer.GetData());
+                Result = Buffer;
                 Result.TrimEndInline();
             }
         }
-        RegCloseKey(hKey);
     }
     return Result;
+#else
+    return FString();
+#endif
 }
 
-uint32 UWINDOWSInfoBPLibrary::ReadRegistryDWORD(const FString& KeyPath, const FString& ValueName, bool bLocalMachine)
+uint32 UWindowsInfoBPLibrary::ReadRegistryDWORD(const FString& KeyPath, const FString& ValueName, bool bLocalMachine)
 {
+#if PLATFORM_WINDOWS
     DWORD Value = 0;
     HKEY RootKey = bLocalMachine ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-    HKEY hKey;
+    FRegistryKeyPtr hKey;
 
     if (RegOpenKeyEx(RootKey, *KeyPath, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
         DWORD Size = sizeof(DWORD);
-        RegQueryValueEx(hKey, *ValueName, nullptr, nullptr, reinterpret_cast<LPBYTE>(&Value), &Size);
-        RegCloseKey(hKey);
+        if (RegQueryValueEx(hKey.Key, *ValueName, nullptr, nullptr, reinterpret_cast<LPBYTE>(&Value), &Size) != ERROR_SUCCESS)
+        {
+            Value = 0;
+        }
     }
     return Value;
+#else
+    return 0;
+#endif
 }
