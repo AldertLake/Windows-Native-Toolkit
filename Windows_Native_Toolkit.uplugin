@@ -10,10 +10,9 @@
 	"DocsURL": "https://github.com/AldertLake/Windows-Native-Toolkit/blob/main/Documentation/1-Windows_Native_ToolKit.md",
 	"MarketplaceURL": "https://www.fab.com/listings/db1cb6ed-ac7e-4408-a901-e45d6694cb0b",
 	"SupportURL": "https://github.com/AldertLake/Windows-Native-Toolkit/issues",
-	"EngineVersion": "5.5.0",
+	"EngineVersion": "5.3.0",
 	"CanContainContent": true,
 	"Installed": true,
-	"FabURL": "com.epicgames.launcher://ue/Fab/product/af2d4c25-08a6-4db3-bef6-b0e0f8ed88a9",
 	"Modules": [
 		{
 			"Name": "Windows_Native_Toolkit",

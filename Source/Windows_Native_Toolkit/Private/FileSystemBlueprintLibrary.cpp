@@ -1,3 +1,10 @@
+/************************************************************************************
+ *                                                                                  *
+ * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
+ * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
+ *                                                                                  *
+ ************************************************************************************/
+
 #include "FileSystemBlueprintLibrary.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"

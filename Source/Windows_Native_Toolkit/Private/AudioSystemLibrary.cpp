@@ -1,32 +1,68 @@
+/************************************************************************************
+ *                                                                                  *
+ * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
+ * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
+ *                                                                                  *
+ ************************************************************************************/
+
 #include "AudioSystemLibrary.h"
-#include "Misc/ScopedSlowTask.h" // For logging
 
 #if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <Windows.h>
 #include <mmdeviceapi.h>
 #include <endpointvolume.h>
 #include <functiondiscoverykeys_devpkey.h>
 
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
+
+#include "CoreMinimal.h"
+#include "Logging/LogMacros.h"
+
 // Log category for audio system
 DEFINE_LOG_CATEGORY_STATIC(LogAudioSystem, Log, All);
 
 // RAII wrapper for COM objects
+#if PLATFORM_WINDOWS
 template<typename T>
-struct FComPtr
+class FComPtr
 {
+public:
     T* Ptr = nullptr;
+
     FComPtr() = default;
     explicit FComPtr(T* InPtr) : Ptr(InPtr) {}
     ~FComPtr() { if (Ptr) Ptr->Release(); }
+    FComPtr(const FComPtr&) = delete;
+    FComPtr& operator=(const FComPtr&) = delete;
+
     T* operator->() const { return Ptr; }
     T** operator&() { return &Ptr; }
     bool IsValid() const { return Ptr != nullptr; }
+
+    void Reset()
+    {
+        if (Ptr)
+        {
+            Ptr->Release();
+            Ptr = nullptr;
+        }
+    }
 };
 
 // Helper to initialize COM and get default audio endpoint
-static bool GetDefaultAudioEndpoint(IMMDevice*& OutDevice, IAudioEndpointVolume*& OutEndpoint)
+static bool GetDefaultAudioEndpoint(FComPtr<IMMDevice>& OutDevice, FComPtr<IAudioEndpointVolume>& OutEndpoint)
 {
-    HRESULT hr = CoInitialize(nullptr);
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hr))
     {
         UE_LOG(LogAudioSystem, Warning, TEXT("Failed to initialize COM: 0x%08X"), hr);
@@ -55,7 +91,6 @@ static bool GetDefaultAudioEndpoint(IMMDevice*& OutDevice, IAudioEndpointVolume*
     if (FAILED(hr))
     {
         UE_LOG(LogAudioSystem, Warning, TEXT("Failed to activate audio endpoint: 0x%08X"), hr);
-        OutDevice->Release();
         CoUninitialize();
         return false;
     }
@@ -69,8 +104,10 @@ float UAudioSystemLibrary::GetSystemVolume()
 #if PLATFORM_WINDOWS
     FComPtr<IMMDevice> Device;
     FComPtr<IAudioEndpointVolume> Endpoint;
-    if (!GetDefaultAudioEndpoint(Device.Ptr, Endpoint.Ptr))
+
+    if (!GetDefaultAudioEndpoint(Device, Endpoint))
     {
+        CoUninitialize();
         return -1.0f;
     }
 
@@ -93,10 +130,13 @@ void UAudioSystemLibrary::SetSystemVolume(float Volume)
 {
 #if PLATFORM_WINDOWS
     Volume = FMath::Clamp(Volume, 0.0f, 1.0f);
+
     FComPtr<IMMDevice> Device;
     FComPtr<IAudioEndpointVolume> Endpoint;
-    if (!GetDefaultAudioEndpoint(Device.Ptr, Endpoint.Ptr))
+
+    if (!GetDefaultAudioEndpoint(Device, Endpoint))
     {
+        CoUninitialize();
         return;
     }
 
@@ -122,7 +162,7 @@ FString UAudioSystemLibrary::GetCurrentAudioDeviceName()
     PropVariantInit(&VarName);
     FString DeviceName = TEXT("Unknown");
 
-    HRESULT hr = CoInitialize(nullptr);
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hr))
     {
         UE_LOG(LogAudioSystem, Warning, TEXT("Failed to initialize COM: 0x%08X"), hr);
@@ -169,6 +209,6 @@ FString UAudioSystemLibrary::GetCurrentAudioDeviceName()
     return DeviceName;
 #else
     UE_LOG(LogAudioSystem, Warning, TEXT("GetCurrentAudioDeviceName not supported on this platform"));
-    return FString(TEXT("Unsupported platform"));
+    return FString(TEXT("Unknown"));
 #endif
 }

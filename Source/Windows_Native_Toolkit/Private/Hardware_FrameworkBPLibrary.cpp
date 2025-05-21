@@ -5,29 +5,38 @@
  *                                                                                  *
  ************************************************************************************/
 
- // Only define macros if not already defined to avoid redefinition warnings
+#include "Hardware_FrameworkBPLibrary.h"
+
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+
 #ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN  // Reduce Windows header bloat
+#define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
-#define NOMINMAX  // Prevent min/max macro conflicts with STL
+#define NOMINMAX
 #endif
 
-#include "Hardware_FrameworkBPLibrary.h"
-#include "Runtime/Core/Public/Windows/WindowsPlatformMisc.h"
-
-#include "Windows/AllowWindowsPlatformTypes.h"
 #include <Windows.h>
 #include <dxgi1_4.h>  // For IDXGIAdapter3
 #include <XInput.h>
 #include <winreg.h>
 #include <vector>
-#include "Windows/HideWindowsPlatformTypes.h"
 
-// Memory Information
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
+
+#include "CoreMinimal.h"
+#include "Runtime/Core/Public/Windows/WindowsPlatformMisc.h"
+#include "Logging/LogMacros.h"
+
+// Log category for system info
+DEFINE_LOG_CATEGORY_STATIC(LogSystemInfo, Log, All);
+
 void USystemInfoBPLibrary::GetMemoryInfo(int32& TotalPhysicalMB, int32& UsedPhysicalMB, int32& FreePhysicalMB,
     int32& TotalVirtualMB, int32& UsedVirtualMB, int32& FreeVirtualMB)
 {
+#if PLATFORM_WINDOWS
     MEMORYSTATUSEX memInfo;
     memInfo.dwLength = sizeof(MEMORYSTATUSEX);
     if (GlobalMemoryStatusEx(&memInfo))
@@ -42,25 +51,31 @@ void USystemInfoBPLibrary::GetMemoryInfo(int32& TotalPhysicalMB, int32& UsedPhys
     }
     else
     {
+        UE_LOG(LogSystemInfo, Warning, TEXT("Failed to get memory info: %d"), GetLastError());
         TotalPhysicalMB = UsedPhysicalMB = FreePhysicalMB = 0;
         TotalVirtualMB = UsedVirtualMB = FreeVirtualMB = 0;
     }
+#else
+    UE_LOG(LogSystemInfo, Warning, TEXT("GetMemoryInfo is not supported on this platform"));
+    TotalPhysicalMB = UsedPhysicalMB = FreePhysicalMB = 0;
+    TotalVirtualMB = UsedVirtualMB = FreeVirtualMB = 0;
+#endif
 }
 
-// CPU Information
 void USystemInfoBPLibrary::GetCPUInfo(FString& Name, FString& Manufacturer, int32& Cores, int32& Threads)
 {
+#if PLATFORM_WINDOWS
     Name = TEXT("Unknown");
     Manufacturer = TEXT("Unknown");
     Cores = Threads = 0;
 
     // Retrieve CPU name from registry
     HKEY hKey;
-    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, TEXT("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
-        TCHAR Buffer[512];
+        WCHAR Buffer[512];
         DWORD BufferSize = sizeof(Buffer);
-        if (RegQueryValueEx(hKey, TEXT("ProcessorNameString"), NULL, NULL, (LPBYTE)Buffer, &BufferSize) == ERROR_SUCCESS)
+        if (RegQueryValueExW(hKey, TEXT("ProcessorNameString"), nullptr, nullptr, (LPBYTE)Buffer, &BufferSize) == ERROR_SUCCESS)
         {
             Name = FString(Buffer).TrimStartAndEnd();
         }
@@ -95,11 +110,11 @@ void USystemInfoBPLibrary::GetCPUInfo(FString& Name, FString& Manufacturer, int3
     }
 
     // Retrieve manufacturer from registry with fallback
-    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, TEXT("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
-        TCHAR Buffer[512];
+        WCHAR Buffer[512];
         DWORD BufferSize = sizeof(Buffer);
-        if (RegQueryValueEx(hKey, TEXT("VendorIdentifier"), NULL, NULL, (LPBYTE)Buffer, &BufferSize) == ERROR_SUCCESS)
+        if (RegQueryValueExW(hKey, TEXT("VendorIdentifier"), nullptr, nullptr, (LPBYTE)Buffer, &BufferSize) == ERROR_SUCCESS)
         {
             Manufacturer = FString(Buffer).TrimStartAndEnd();
         }
@@ -109,18 +124,25 @@ void USystemInfoBPLibrary::GetCPUInfo(FString& Name, FString& Manufacturer, int3
     {
         Manufacturer = FPlatformMisc::GetCPUVendor();
     }
+#else
+    UE_LOG(LogSystemInfo, Warning, TEXT("GetCPUInfo is not supported on this platform"));
+    Name = TEXT("Unsupported");
+    Manufacturer = TEXT("Unsupported");
+    Cores = Threads = 0;
+#endif
 }
 
-// GPU Information
 void USystemInfoBPLibrary::GetGPUInfo(FString& Name, FString& Manufacturer, int32& TotalVRAMMB,
     int32& UsedVRAMMB, int32& FreeVRAMMB)
 {
+#if PLATFORM_WINDOWS
     Name = TEXT("Unknown");
     Manufacturer = TEXT("Unknown");
     TotalVRAMMB = UsedVRAMMB = FreeVRAMMB = 0;
 
     IDXGIFactory* pFactory = nullptr;
-    if (SUCCEEDED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&pFactory)))
+    HRESULT hr = CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&pFactory);
+    if (SUCCEEDED(hr))
     {
         IDXGIAdapter* pAdapter = nullptr;
         if (SUCCEEDED(pFactory->EnumAdapters(0, &pAdapter)))
@@ -137,13 +159,13 @@ void USystemInfoBPLibrary::GetGPUInfo(FString& Name, FString& Manufacturer, int3
                 case 0x10DE: Manufacturer = TEXT("NVIDIA"); break;
                 case 0x1002: Manufacturer = TEXT("AMD"); break;
                 case 0x8086: Manufacturer = TEXT("Intel"); break;
-                case 0x1414: Manufacturer = TEXT("Microsoft"); break; // For virtualized environments
+                case 0x1414: Manufacturer = TEXT("Microsoft"); break;
                 default: Manufacturer = TEXT("Unknown"); break;
                 }
 
                 // Query VRAM usage (DXGI 1.4)
                 IDXGIAdapter3* pAdapter3 = nullptr;
-                if (SUCCEEDED(pAdapter->QueryInterface(__uuidof(IDXGIFactory), (void**)&pAdapter3)))
+                if (SUCCEEDED(pAdapter->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&pAdapter3)))
                 {
                     DXGI_QUERY_VIDEO_MEMORY_INFO memoryInfo;
                     if (SUCCEEDED(pAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memoryInfo)))
@@ -158,11 +180,21 @@ void USystemInfoBPLibrary::GetGPUInfo(FString& Name, FString& Manufacturer, int3
         }
         pFactory->Release();
     }
+    else
+    {
+        UE_LOG(LogSystemInfo, Warning, TEXT("Failed to create DXGI factory: 0x%08X"), hr);
+    }
+#else
+    UE_LOG(LogSystemInfo, Warning, TEXT("GetGPUInfo is not supported on this platform"));
+    Name = TEXT("Unsupported");
+    Manufacturer = TEXT("Unsupported");
+    TotalVRAMMB = UsedVRAMMB = FreeVRAMMB = 0;
+#endif
 }
 
-// Input Devices
 void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, bool& HasKeyboard)
 {
+#if PLATFORM_WINDOWS
     // Gamepad detection using XInput
     XINPUT_STATE state;
     HasGamepad = (XInputGetState(0, &state) == ERROR_SUCCESS);
@@ -172,4 +204,8 @@ void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, boo
 
     // Keyboard detection (assumed true on Windows)
     HasKeyboard = true;
+#else
+    UE_LOG(LogSystemInfo, Warning, TEXT("GetInputDevices is not supported on this platform"));
+    HasGamepad = HasMouse = HasKeyboard = false;
+#endif
 }
