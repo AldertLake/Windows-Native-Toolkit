@@ -40,12 +40,6 @@ public class Windows_Native_Toolkit : ModuleRules
                 "Ws2_32.lib",     // Winsock (UNetworkUtilities)
                 "Wlanapi.lib"     // WLAN APIs (UNetworkUtilities)
             });
-
-            // Additional libraries for specific Windows APIs
-            PublicAdditionalLibraries.Add("BthProps.lib"); // Bluetooth APIs
-            PublicAdditionalLibraries.Add("Ws2_32.lib");   // Winsock2 for Bluetooth sockets
-            PublicAdditionalLibraries.Add("Ole32.lib");    // COM support for other classes
-            PublicAdditionalLibraries.Add("User32.lib");   // Windows messages (potential dependency)
         }
     }
 }

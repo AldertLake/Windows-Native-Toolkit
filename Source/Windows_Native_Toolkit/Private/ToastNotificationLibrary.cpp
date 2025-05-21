@@ -6,137 +6,102 @@
  ************************************************************************************/
 
 #include "ToastNotificationLibrary.h"
-
-#if PLATFORM_WINDOWS
+#include <string> // Added for std::wstring
 #include "Windows/AllowWindowsPlatformTypes.h"
-
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
 #include <Windows.h>
-#include <Shellapi.h>
-#include <string>
-
-#include "Windows/HideWindowsPlatformTypes.h"
-#endif
-
-#include "CoreMinimal.h"
+#include <ShellAPI.h>
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/CoreDelegates.h"
-#include "Logging/LogMacros.h"
+#include "Windows/HideWindowsPlatformTypes.h"
 
-// Log category for toast notifications
-DEFINE_LOG_CATEGORY_STATIC(LogToastNotification, Log, All);
-
-// Static member definitions
-#if PLATFORM_WINDOWS
 static NOTIFYICONDATAW TrayIconData = { 0 };
 static bool bIsTrayIconInitialized = false;
-static bool bIsShutdownRegistered = false;
-#endif
+bool UToastNotificationLibrary::bIsShutdownRegistered = false;
 
+// Registers cleanup callback on application exit
 void UToastNotificationLibrary::StaticInitialize()
 {
-#if PLATFORM_WINDOWS
     if (!bIsShutdownRegistered)
     {
         FCoreDelegates::OnPreExit.AddLambda([]()
-        {
-            CleanupTrayIcon();
-        });
+            {
+                CleanupTrayIcon();
+            });
         bIsShutdownRegistered = true;
     }
-#else
-    UE_LOG(LogToastNotification, Warning, TEXT("StaticInitialize is only supported on Windows platforms."));
-#endif
 }
 
+// Manually cleans up resources (optional)
 void UToastNotificationLibrary::StaticShutdown()
 {
-#if PLATFORM_WINDOWS
     CleanupTrayIcon();
     bIsShutdownRegistered = false;
-#else
-    UE_LOG(LogToastNotification, Warning, TEXT("StaticShutdown is only supported on Windows platforms."));
-#endif
 }
 
+// Retrieves the game title from the configuration or uses a fallback
 FString UToastNotificationLibrary::GetGameTitle()
 {
     FString GameTitle;
-    if (GConfig && GConfig->GetString(TEXT("/Script/EngineSettings.GeneralProjectSettings"), TEXT("ProjectName"), GameTitle, GGameIni))
-    {
-        return GameTitle.IsEmpty() ? TEXT("My Unreal Game") : GameTitle;
-    }
-    return TEXT("My Unreal Game");
+    GConfig->GetString(TEXT("/Script/EngineSettings.GeneralProjectSettings"), TEXT("ProjectName"), GameTitle, GGameIni);
+    return GameTitle.IsEmpty() ? TEXT("My Unreal Game") : GameTitle;
 }
 
+// Displays a tray notification with the specified title, message, and icon type
 void UToastNotificationLibrary::ShowToastNotification(const FString& Title, const FString& Message, EToastIconType IconType)
 {
-#if PLATFORM_WINDOWS
-    StaticInitialize();
+    StaticInitialize(); // Ensure cleanup is registered
     DisplayTrayNotification(Title, Message, IconType);
-#else
-    UE_LOG(LogToastNotification, Warning, TEXT("ShowToastNotification is only supported on Windows platforms."));
-#endif
 }
 
+// Removes the tray icon from the system tray
 void UToastNotificationLibrary::CleanupTrayIcon()
 {
-#if PLATFORM_WINDOWS
     if (bIsTrayIconInitialized)
     {
-        if (!Shell_NotifyIconW(NIM_DELETE, &TrayIconData))
-        {
-            UE_LOG(LogToastNotification, Warning, TEXT("Failed to remove tray icon: %d"), GetLastError());
-        }
+        Shell_NotifyIconW(NIM_DELETE, &TrayIconData);
+        bIsTrayIconInitialized = false;
+        ZeroMemory(&TrayIconData, sizeof(NOTIFYICONDATAW)); // Clear structure to prevent stale data
+    }
+}
+
+// Internal implementation of tray notification display
+void UToastNotificationLibrary::DisplayTrayNotification(const FString& Title, const FString& Message, EToastIconType IconType)
+{
+    // Clean up any existing tray icon to avoid conflicts
+    if (bIsTrayIconInitialized)
+    {
+        Shell_NotifyIconW(NIM_DELETE, &TrayIconData);
         bIsTrayIconInitialized = false;
         ZeroMemory(&TrayIconData, sizeof(NOTIFYICONDATAW));
     }
-#else
-    UE_LOG(LogToastNotification, Warning, TEXT("CleanupTrayIcon is only supported on Windows platforms."));
-#endif
-}
-
-void UToastNotificationLibrary::DisplayTrayNotification(const FString& Title, const FString& Message, EToastIconType IconType)
-{
-#if PLATFORM_WINDOWS
-    // Clean up any existing tray icon to avoid conflicts
-    CleanupTrayIcon();
 
     // Get the active window handle
     HWND hWnd = GetActiveWindow();
     if (!hWnd)
     {
-        UE_LOG(LogToastNotification, Warning, TEXT("No active window handle available for tray notification."));
-        return;
+        return; // Silently fail if no window is available
     }
 
     // Get the game title for the tooltip
     FString GameTitle = GetGameTitle();
-    std::wstring GameTitleW(*GameTitle);
+    std::wstring GameTitleW(*GameTitle); // Simplified FString to std::wstring conversion
 
     // Initialize tray icon data
     TrayIconData.cbSize = sizeof(NOTIFYICONDATAW);
     TrayIconData.hWnd = hWnd;
-    TrayIconData.uID = 1;
+    TrayIconData.uID = 1; // Unique ID for the tray icon
     TrayIconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_INFO;
-    TrayIconData.uCallbackMessage = WM_USER + 1;
-    TrayIconData.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    TrayIconData.uCallbackMessage = WM_USER + 1; // Custom message ID
+    TrayIconData.hIcon = LoadIcon(NULL, IDI_APPLICATION); // Default application icon
     TrayIconData.uTimeout = 5000; // 5-second timeout
 
     // Set tooltip (limited to 128 characters)
-    wcsncpy_s(TrayIconData.szTip, _countof(TrayIconData.szTip), GameTitleW.c_str(), _TRUNCATE);
+    wcsncpy_s(TrayIconData.szTip, ARRAYSIZE(TrayIconData.szTip), GameTitleW.c_str(), _TRUNCATE);
 
     // Add the tray icon
     if (!Shell_NotifyIconW(NIM_ADD, &TrayIconData))
     {
-        UE_LOG(LogToastNotification, Warning, TEXT("Failed to add tray icon: %d"), GetLastError());
-        return;
+        return; // Silently fail if tray icon creation fails
     }
 
     bIsTrayIconInitialized = true;
@@ -145,27 +110,21 @@ void UToastNotificationLibrary::DisplayTrayNotification(const FString& Title, co
     switch (IconType)
     {
     case EToastIconType::Warning:
-        TrayIconData.dwInfoFlags = NIIF_WARNING;
+        TrayIconData.dwInfoFlags = NIIF_WARNING; // Exclamation mark
         break;
     case EToastIconType::Error:
-        TrayIconData.dwInfoFlags = NIIF_ERROR;
+        TrayIconData.dwInfoFlags = NIIF_ERROR;   // Error (red X)
         break;
     case EToastIconType::Info:
     default:
-        TrayIconData.dwInfoFlags = NIIF_INFO;
+        TrayIconData.dwInfoFlags = NIIF_INFO;    // Info (blue "i")
         break;
     }
 
     // Set title and message (with length limits)
-    wcsncpy_s(TrayIconData.szInfoTitle, _countof(TrayIconData.szInfoTitle), *Title, _TRUNCATE);
-    wcsncpy_s(TrayIconData.szInfo, _countof(TrayIconData.szInfo), *Message, _TRUNCATE);
+    wcsncpy_s(TrayIconData.szInfoTitle, ARRAYSIZE(TrayIconData.szInfoTitle), *Title, 64);
+    wcsncpy_s(TrayIconData.szInfo, ARRAYSIZE(TrayIconData.szInfo), *Message, 256);
 
     // Show the notification
-    if (!Shell_NotifyIconW(NIM_MODIFY, &TrayIconData))
-    {
-        UE_LOG(LogToastNotification, Warning, TEXT("Failed to show tray notification: %d"), GetLastError());
-    }
-#else
-    UE_LOG(LogToastNotification, Warning, TEXT("DisplayTrayNotification is only supported on Windows platforms."));
-#endif
+    Shell_NotifyIconW(NIM_MODIFY, &TrayIconData);
 }

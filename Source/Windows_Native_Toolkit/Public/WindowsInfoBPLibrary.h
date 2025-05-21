@@ -1,10 +1,3 @@
-/************************************************************************************
- *                                                                                  *
- * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
- * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
- *                                                                                  *
- ************************************************************************************/
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -24,30 +17,35 @@ class WINDOWS_NATIVE_TOOLKIT_API UWindowsInfoBPLibrary : public UBlueprintFuncti
 public:
     /**
      * Gets the Windows version (e.g., "Windows 11", "Windows 10").
+     * @return Version name or "Unknown" if unavailable.
      */
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetWindowsVersion();
 
     /**
      * Gets the Windows build number (e.g., "22000.1234").
+     * @return Build number or "Unknown" if unavailable.
      */
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetWindowsBuild();
 
     /**
      * Gets the Windows edition (e.g., "Pro", "Home").
+     * @return Edition name or "Unknown" if unavailable.
      */
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetWindowsEdition();
 
     /**
      * Gets the PC's computer name.
+     * @return Computer name or "Unknown" if unavailable.
      */
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetPCName();
 
     /**
      * Gets the local user name.
+     * @return User name or "Unknown" if unavailable.
      */
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetLocalUserName();
