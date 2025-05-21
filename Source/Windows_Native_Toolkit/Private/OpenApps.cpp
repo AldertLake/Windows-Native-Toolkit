@@ -1,58 +1,71 @@
-/************************************************************************************
- *																					*
- * Copyright (c) 2025 AldertLake. All Rights Reserved.								*
- * GitHub:	https://github.com/AldertLake/Windows-Native-Toolkit					*
- *																					*
- ************************************************************************************/
-
 #include "OpenApps.h"
+#include "Misc/Paths.h"
+
+#if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
 #include <shellapi.h>
 #include <tlhelp32.h>
-#include "Misc/Paths.h"
+#include "Windows/HideWindowsPlatformTypes.h"
+
+// RAII wrapper for HANDLE
+struct FHandlePtr
+{
+    HANDLE Handle = nullptr;
+    FHandlePtr() = default;
+    explicit FHandlePtr(HANDLE InHandle) : Handle(InHandle) {}
+    ~FHandlePtr() { if (Handle && Handle != INVALID_HANDLE_VALUE) CloseHandle(Handle); }
+    HANDLE* operator&() { return &Handle; }
+    bool IsValid() const { return Handle != nullptr && Handle != INVALID_HANDLE_VALUE; }
+};
+#endif
 
 bool UOpenApps::OpenApps(const FString& ExePath)
 {
+#if PLATFORM_WINDOWS
     if (ExePath.IsEmpty())
     {
-        UE_LOG(LogTemp, Warning, TEXT("OpenApps: Empty executable path provided"));
         return false;
     }
 
-    std::wstring WidePath = std::wstring(*ExePath);
-
-    HINSTANCE Result = ShellExecuteW(
-        NULL,           // No parent window
-        L"open",        // Operation to perform
-        WidePath.c_str(), // Path to executable
-        NULL,           // No parameters
-        NULL,           // Default directory
-        SW_SHOWNORMAL   // Show window normally
-    );
-
-    bool bSuccess = reinterpret_cast<intptr_t>(Result) > 32;
-
-    if (!bSuccess)
+    // Validate file existence
+    FString NormalizedPath = FPaths::ConvertRelativePathToFull(ExePath);
+    if (!FPaths::FileExists(NormalizedPath))
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to open application: %s"), *ExePath);
+        return false;
     }
 
-    return bSuccess;
+    // Use TCHAR for wide-character path
+    const TCHAR* WidePath = *NormalizedPath;
+
+    HINSTANCE Result = ShellExecuteW(
+        nullptr,        // No parent window
+        L"open",       // Operation to perform
+        WidePath,      // Path to executable
+        nullptr,       // No parameters
+        nullptr,       // Default directory
+        SW_SHOWNORMAL  // Show window normally
+    );
+
+    return reinterpret_cast<intptr_t>(Result) > 32;
+#else
+    return false; // Non-Windows platforms
+#endif
 }
 
 bool UOpenApps::IsAppRunning(const FString& ExePath)
 {
+#if PLATFORM_WINDOWS
     if (ExePath.IsEmpty())
     {
-        UE_LOG(LogTemp, Warning, TEXT("IsAppRunning: Empty executable path provided"));
         return false;
     }
 
+    // Extract filename for matching
     FString FileName = FPaths::GetCleanFilename(ExePath);
-    std::wstring WideFileName = std::wstring(*FileName);
+    const TCHAR* WideFileName = *FileName;
 
-    HANDLE Snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (Snapshot == INVALID_HANDLE_VALUE)
+    FHandlePtr Snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+    if (!Snapshot.IsValid())
     {
         return false;
     }
@@ -61,20 +74,20 @@ bool UOpenApps::IsAppRunning(const FString& ExePath)
     ProcessEntry.dwSize = sizeof(PROCESSENTRY32W);
 
     bool bIsRunning = false;
-    if (Process32FirstW(Snapshot, &ProcessEntry))
+    if (Process32FirstW(Snapshot.Handle, &ProcessEntry))
     {
         do
         {
-            if (_wcsicmp(ProcessEntry.szExeFile, WideFileName.c_str()) == 0)
+            if (_wcsicmp(ProcessEntry.szExeFile, WideFileName) == 0)
             {
                 bIsRunning = true;
-                break;
+                break; // Early exit on match
             }
-        } while (Process32NextW(Snapshot, &ProcessEntry));
+        } while (Process32NextW(Snapshot.Handle, &ProcessEntry));
     }
 
-    CloseHandle(Snapshot);
     return bIsRunning;
+#else
+    return false; // Non-Windows platforms
+#endif
 }
-
-#include "Windows/HideWindowsPlatformTypes.h"
