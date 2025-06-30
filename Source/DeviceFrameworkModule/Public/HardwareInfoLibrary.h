@@ -1,14 +1,13 @@
-/************************************************************************************
- *                                                                                  *
- * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
- * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
- *                                                                                  *
- ************************************************************************************/
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
 
 #pragma once
 
 #include "Kismet/BlueprintFunctionLibrary.h"
-#include "Hardware_FrameworkBPLibrary.generated.h"
+#include "HardwareInfoLibrary.generated.h"
 
 UCLASS()
 class USystemInfoBPLibrary : public UBlueprintFunctionLibrary

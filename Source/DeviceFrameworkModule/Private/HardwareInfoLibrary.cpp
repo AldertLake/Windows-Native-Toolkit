@@ -1,27 +1,17 @@
-/************************************************************************************
- *                                                                                  *
- * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
- * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
- *                                                                                  *
- ************************************************************************************/
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
 
- // Only define macros if not already defined to avoid redefinition warnings
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN  // Reduce Windows header bloat
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX  // Prevent min/max macro conflicts with STL
-#endif
-
-#include "Hardware_FrameworkBPLibrary.h"
+#include "HardwareInfoLibrary.h"
 #include "Runtime/Core/Public/Windows/WindowsPlatformMisc.h"
 
 #include "Windows/AllowWindowsPlatformTypes.h"
-#include <Windows.h>
-#include <dxgi1_4.h>  // For IDXGIAdapter3
-#include <XInput.h>
-#include <winreg.h>
-#include <vector>
+#include "Windows/MinWindows.h"
+#include <dxgi1_4.h> 
+#include <Xinput.h>    
+#include <winreg.h>    
 #include "Windows/HideWindowsPlatformTypes.h"
 
 // Memory Information

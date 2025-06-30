@@ -1,3 +1,9 @@
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
+
 #include "FilePickerLibrary.h"
 #include "DesktopPlatformModule.h"
 #include "Misc/Paths.h"
@@ -5,7 +11,7 @@
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
-#include <windows.h>
+#include "Windows/WindowsHWrapper.h"
 #include "Windows/HideWindowsPlatformTypes.h"
 #endif
 

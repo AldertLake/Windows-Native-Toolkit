@@ -1,3 +1,9 @@
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
+
 using UnrealBuildTool;
 
 public class DeviceFrameworkModule : ModuleRules
@@ -17,9 +23,10 @@ public class DeviceFrameworkModule : ModuleRules
         {
             PublicSystemLibraries.AddRange(new string[]
             {
-                "Winmm.lib",    // AudioSystemLibrary
-                "XInput.lib",   // Hardware input polling
-                "Advapi32.lib"  // Hardware framework BPLibrary (registry or sensor access)
+                "Winmm.lib", 
+                "XInput.lib",   
+                "Advapi32.lib", 
+                "dxgi.lib"      
             });
         }
     }

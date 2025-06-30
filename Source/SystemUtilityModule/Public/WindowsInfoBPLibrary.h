@@ -1,52 +1,38 @@
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "WindowsInfoBPLibrary.generated.h"
 
-/**
- * Blueprint function library for retrieving Windows system information.
- * Provides functions to query Windows version, build, edition, PC name, and user name.
- * Note: Some functions are Windows-only; unsupported platforms return default values.
- */
 UCLASS()
-class WINDOWS_NATIVE_TOOLKIT_API UWindowsInfoBPLibrary : public UBlueprintFunctionLibrary
+class SYSTEMUTILITYMODULE_API UWindowsInfoBPLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
-    /**
-     * Gets the Windows version (e.g., "Windows 11", "Windows 10").
-     * @return Version name or "Unknown" if unavailable.
-     */
+    //Output windwos current version
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetWindowsVersion();
 
-    /**
-     * Gets the Windows build number (e.g., "22000.1234").
-     * @return Build number or "Unknown" if unavailable.
-     */
+    //Get Windows Build
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetWindowsBuild();
 
-    /**
-     * Gets the Windows edition (e.g., "Pro", "Home").
-     * @return Edition name or "Unknown" if unavailable.
-     */
+    //Get widows edition name eg: Proffesionel, Home, LTSC..
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetWindowsEdition();
 
-    /**
-     * Gets the PC's computer name.
-     * @return Computer name or "Unknown" if unavailable.
-     */
+    //Get the PC Name eg DESKTOP-XXXXX
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetPCName();
 
-    /**
-     * Gets the local user name.
-     * @return User name or "Unknown" if unavailable.
-     */
+    //Get local user name 
     UFUNCTION(BlueprintPure, Category = "Windows Info")
     static FString GetLocalUserName();
 

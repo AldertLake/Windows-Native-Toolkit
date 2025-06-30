@@ -1,9 +1,17 @@
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
+
 #include "WindowsInfoBPLibrary.h"
 #include "Windows/AllowWindowsPlatformTypes.h"
+#include "Windows/WindowsHWrapper.h" 
 #include "Windows/WindowsPlatformMisc.h"
 #include <lmcons.h>
 #include <winreg.h>
 #include "Windows/HideWindowsPlatformTypes.h"
+
 
 // RAII wrapper for HKEY
 struct FRegistryKeyPtr

@@ -1,13 +1,19 @@
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
+
 #include "OpenApps.h"
 #include "Misc/Paths.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
+#include "Windows/WindowsHWrapper.h"  
 #include <shellapi.h>
 #include <tlhelp32.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 
-// RAII wrapper for HANDLE
 struct FHandlePtr
 {
     HANDLE Handle = nullptr;
@@ -18,6 +24,7 @@ struct FHandlePtr
     bool IsValid() const { return Handle != nullptr && Handle != INVALID_HANDLE_VALUE; }
 };
 #endif
+
 
 bool UOpenApps::OpenApps(const FString& ExePath)
 {

@@ -1,22 +1,27 @@
-/************************************************************************************
- *																					*
- * Copyright (c) 2025 AldertLake. All Rights Reserved.								*
- * GitHub:	https://github.com/AldertLake/Windows-Native-Toolkit					*
- *																					*
- ************************************************************************************/
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
 
 #include "NetworkUtilities.h"
-#include "Windows/AllowWindowsPlatformTypes.h" // I mean clearly for windows API innit ?
+
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include "Windows/WindowsHWrapper.h"  
+
 #include <winsock2.h>
 #include <iphlpapi.h>
 #include <wininet.h>
 #include <ws2tcpip.h>
-#include <wlanapi.h> // For Wi-Fi SSID fonction (does not work for ethernet)
-#pragma comment(lib, "iphlpapi.lib") // Link IP Helper library
-#pragma comment(lib, "wininet.lib")  // Link WinINet library
-#pragma comment(lib, "ws2_32.lib")   // Link Winsock library
-#pragma comment(lib, "wlanapi.lib")  // Link WLAN API library
-#include "Windows/HideWindowsPlatformTypes.h" 
+#include <wlanapi.h>  
+
+#pragma comment(lib, "iphlpapi.lib")  
+#pragma comment(lib, "wininet.lib")   
+#pragma comment(lib, "ws2_32.lib")    
+#pragma comment(lib, "wlanapi.lib")    
+
+#include "Windows/HideWindowsPlatformTypes.h"
+
 
 FString UNetworkUtilities::GetLocalIpAddress()
 {

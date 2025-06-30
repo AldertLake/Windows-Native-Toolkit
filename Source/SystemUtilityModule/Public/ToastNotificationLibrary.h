@@ -1,3 +1,9 @@
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -7,34 +13,23 @@
 UENUM(BlueprintType)
 enum class EToastIconType : uint8
 {
-    Info        UMETA(DisplayName = "Info"),       // Default info icon
-    Warning     UMETA(DisplayName = "Exclamation"), // Exclamation mark
-    Error       UMETA(DisplayName = "Error")       // Error (red X)
+    Info        UMETA(DisplayName = "Info"),
+    Warning     UMETA(DisplayName = "Exclamation"),
+    Error       UMETA(DisplayName = "Error")
 };
 
-/**
- * Blueprint function library for displaying Windows system tray notifications.
- * Provides functions to show notifications and clean up the tray icon.
- * Note: This library is designed exclusively for Windows platforms.
- */
 UCLASS()
-class WINDOWS_NATIVE_TOOLKIT_API UToastNotificationLibrary : public UBlueprintFunctionLibrary
+class SYSTEMUTILITYMODULE_API UToastNotificationLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
-    /**
-     * Displays a system tray notification with a title, message, and customizable icon.
-     * @param Title The title of the notification (max 64 characters).
-     * @param Message The message body of the notification (max 256 characters).
-     * @param IconType The type of icon to display (Info, Warning, Error).
-     */
+
+    //Toast notification with custom title and content
     UFUNCTION(BlueprintCallable, Category = "Toast Notification")
     static void ShowToastNotification(const FString& Title, const FString& Message, EToastIconType IconType = EToastIconType::Info);
 
-    /**
-     * Removes the system tray icon. Automatically called on application exit, but can be invoked manually if needed.
-     */
+    //This should be called each time the show notification node ended
     UFUNCTION(BlueprintCallable, Category = "Toast Notification")
     static void CleanupTrayIcon();
 

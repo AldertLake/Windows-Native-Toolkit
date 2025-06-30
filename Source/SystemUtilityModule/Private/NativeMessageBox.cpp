@@ -1,9 +1,8 @@
-/************************************************************************************
- *                                                                                  *
- * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
- * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
- *                                                                                  *
- ************************************************************************************/
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
 
 #include "NativeMessageBox.h"
 #include "Windows/WindowsHWrapper.h"

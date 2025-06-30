@@ -1,7 +1,15 @@
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
+
 #include "BatteryUtility.h"
 
 #if PLATFORM_WINDOWS
-#include <windows.h>
+
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include "Windows/WindowsHWrapper.h"
 
 // Log category for battery utility
 DEFINE_LOG_CATEGORY_STATIC(LogBatteryUtility, Log, All);
@@ -23,6 +31,9 @@ static bool GetBatteryStatus(SYSTEM_POWER_STATUS& OutStatus)
     UE_LOG(LogBatteryUtility, Warning, TEXT("Failed to get system power status"));
     return false;
 }
+
+#include "Windows/HideWindowsPlatformTypes.h"
+
 #endif
 
 bool UBatteryUtility::HasBattery()

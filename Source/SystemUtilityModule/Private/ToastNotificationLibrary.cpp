@@ -1,17 +1,17 @@
-/************************************************************************************
- *                                                                                  *
- * Copyright (c) 2025 AldertLake. All Rights Reserved.                              *
- * GitHub: https://github.com/AldertLake/Windows-Native-Toolkit                    *
- *                                                                                  *
- ************************************************************************************/
+// ---------------------------------------------------
+// Copyright (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:   https://github.com/AldertLake/
+// Support:  https://ko-fi.com/aldertlake
+// ---------------------------------------------------
 
 #include "ToastNotificationLibrary.h"
 #include "Windows/AllowWindowsPlatformTypes.h"
-#include <Windows.h>
+#include "Windows/WindowsHWrapper.h" 
 #include <ShellAPI.h>
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/CoreDelegates.h"
 #include "Windows/HideWindowsPlatformTypes.h"
+
 
 static NOTIFYICONDATAW TrayIconData = { 0 };
 static bool bIsTrayIconInitialized = false;
