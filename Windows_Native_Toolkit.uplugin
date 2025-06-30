@@ -13,7 +13,6 @@
 	"EngineVersion": "5.5.0",
 	"CanContainContent": true,
 	"Installed": true,
-	"FabURL": "com.epicgames.launcher://ue/Fab/product/af2d4c25-08a6-4db3-bef6-b0e0f8ed88a9",
 	"Modules": [
 		{
 			"Name": "Windows_Native_Toolkit",
