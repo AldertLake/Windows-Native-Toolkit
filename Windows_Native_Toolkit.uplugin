@@ -1,26 +1,42 @@
 {
-	"FileVersion": 3,
-	"Version": 1,
-	"VersionName": "1.4",
-	"FriendlyName": "Windows Native Toolkit",
-	"Description": "The Windows Native Toolkit provides Blueprint nodes for accessing native Windows features like hardware info, keyboard layout, message boxes, and file pickers. It streamlines Unreal Engine development by integrating essential system-level functionalities.",
-	"Category": "Windows Tools",
-	"CreatedBy": "AldertLake",
-	"CreatedByURL": "https://github.com/AldertLake",
-	"DocsURL": "https://github.com/AldertLake/Windows-Native-Toolkit/blob/main/Documentation/1-Windows_Native_ToolKit.md",
-	"MarketplaceURL": "https://www.fab.com/listings/db1cb6ed-ac7e-4408-a901-e45d6694cb0b",
-	"SupportURL": "https://github.com/AldertLake/Windows-Native-Toolkit/issues",
-	"EngineVersion": "5.5.0",
-	"CanContainContent": true,
-	"Installed": true,
-	"Modules": [
-		{
-			"Name": "Windows_Native_Toolkit",
-			"Type": "Runtime",
-			"LoadingPhase": "PreLoadingScreen",
-			"PlatformAllowList": [
-				"Win64"
-			]
-		}
-	]
+  "FileVersion": 3,
+  "Version": 2,
+  "VersionName": "2.0",
+  "FriendlyName": "Windows Native Toolkit",
+  "Description": "The Windows Native Toolkit provides Blueprint nodes for accessing native Windows features like hardware info, keyboard layout, message boxes, and file pickers. It streamlines Unreal Engine development by integrating essential system-level functionalities.",
+  "Category": "Windows Tools",
+  "CreatedBy": "AldertLake",
+  "CreatedByURL": "https://github.com/AldertLake",
+  "DocsURL": "https://github.com/AldertLake/Windows-Native-Toolkit/blob/main/Documentation/1-Windows_Native_ToolKit.md",
+  "MarketplaceURL": "https://www.fab.com/listings/db1cb6ed-ac7e-4408-a901-e45d6694cb0b",
+  "SupportURL": "https://github.com/AldertLake/Windows-Native-Toolkit/issues",
+  "EngineVersion": "5.5.0",
+  "CanContainContent": true,
+  "Installed": true,
+  "Modules": [
+    {
+      "Name": "SystemUtilityModule",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [ "Win64" ]
+    },
+    {
+      "Name": "NetworkUtilityModule",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [ "Win64" ]
+    },
+    {
+      "Name": "DeviceFrameworkModule",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [ "Win64" ]
+    },
+    {
+      "Name": "FileIOUtilityModule",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [ "Win64" ]
+    }
+  ]
 }
