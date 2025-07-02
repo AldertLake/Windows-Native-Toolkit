@@ -51,7 +51,7 @@ void ExampleUsage()
 
 **Retrieves if user has a battery in his laptop or is using a desktop with no battery.**
 
-<img src="https://github.com/user-attachments/assets/b2ac3cef-8dd3-4dbe-a2ea-54a9cd61afe4" width="400">
+<img src="Images\Battery\HasBattery.png" width="400">
 
 
 
@@ -59,7 +59,7 @@ void ExampleUsage()
 
 **Get the user battery charging level in forme of Float (range: `0.0` to `1.0`).**
 
-<img src="https://github.com/user-attachments/assets/3377a5d5-ce8f-4741-b77d-e2c4c3f9cbfc" width="400">
+<img src="Images\Battery\GetBatteryLevel.png" width="400">
 
 
 
@@ -68,13 +68,13 @@ void ExampleUsage()
 
 **Retrieves if user has charger plugged in or not.**
 
-<img src="https://github.com/user-attachments/assets/acf377ce-22e0-4a11-8ad3-29483445088e" width="400">
+<img src="Images\Battery\IsBatteryCharging.png" width="400">
 
 
 ## 💹 Is Fully Charged-Blueprint
 
 **Retrieves if Battery is charged 100% or not.**
 
-<img src="https://github.com/user-attachments/assets/1dc9e640-e5b1-4f39-857c-3bd9512681a0" width="400">
+<img src="Images\Battery\IsBatteryCharget.png" width="400">
 
 

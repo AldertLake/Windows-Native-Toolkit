@@ -49,21 +49,21 @@ UE_LOG(LogTemp, Log, TEXT("Current Audio Device: %s"), *DeviceName);
 
 **Retrieves the current system volume level Float (range: `0.0` to `1.0`).**
 
-<img src="https://github.com/user-attachments/assets/6a469517-0884-4eaf-b760-14ef202abc7a" width="400">
+<img src="Images\Audio\GetSystemVolume.png" width="400">
 
 
 ## 🎚️ SetSystemVolume-Blueprint
 
 **Sets the system volume to a specified level Float (range: `0.0` to `1.0`).**
 
-<img src="https://github.com/user-attachments/assets/b731a5e7-a5f4-498e-b2c4-b16f8faa85f1" width="400">
+<img src="Images\Audio\SetSystemVolume.png" width="400">
 
 
 ## 🎧 GetCurrentAudioDeviceName-Blueprint
 
 **Retrieves the name of the currently active audio playback device As A String.**
 
-<img src="https://github.com/user-attachments/assets/1de45d40-a4e7-4e8a-80b1-c0643468ec47" width="400">
+<img src="Images\Audio\GetAudioDeviceName.png" width="400">
 
 
 

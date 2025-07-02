@@ -83,7 +83,7 @@ UE_LOG(LogTemp, Log, TEXT("Gamepad: %s, Mouse: %s, Keyboard: %s"),
 
 **Retrieves User CPU Name, Manufacturer, Cores and threads number.**
 
-<img src="https://github.com/user-attachments/assets/c26fcfc5-5d8d-43e9-adaa-f7e0d36b78c0" width="400">
+<img src="Images\HardwareInfo\CPUInfo.png" width="400">
 
 
 
@@ -92,7 +92,7 @@ UE_LOG(LogTemp, Log, TEXT("Gamepad: %s, Mouse: %s, Keyboard: %s"),
 
 **Get the user Graphics card related info (Manufacturer, Name, Vram in MB...).**
 
-<img src="https://github.com/user-attachments/assets/3a1cc9db-01a1-4a96-9537-f3374d927f0f" width="400">
+<img src="Images\HardwareInfo\GPUInfo.png" width="400">
 
 
 
@@ -102,7 +102,7 @@ UE_LOG(LogTemp, Log, TEXT("Gamepad: %s, Mouse: %s, Keyboard: %s"),
 
 **Retrieves user memory related info in MB.**
 
-<img src="https://github.com/user-attachments/assets/a0a14aee-f33e-4805-905b-92577b709d45" width="400">
+<img src="Images\HardwareInfo\MemoryInfo.png" width="400">
 
 
 
@@ -111,7 +111,7 @@ UE_LOG(LogTemp, Log, TEXT("Gamepad: %s, Mouse: %s, Keyboard: %s"),
 
 **Get if user has controller, keyboard, mouse connected to the PC or not.**
 
-<img src="https://github.com/user-attachments/assets/f778ed95-81af-4be5-a52e-d2595528b4f6" width="400">
+<img src="Images\HardwareInfo\InputDevices.png" width="400">
 
 
 

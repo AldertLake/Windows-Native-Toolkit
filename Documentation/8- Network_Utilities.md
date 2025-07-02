@@ -86,7 +86,7 @@ UE_LOG(LogTemp, Log, TEXT("Connection type: %s"), *ConnectionType);
 
 **Retrieves the player local ip adress in forme of string, can be used when building an Co-op mutliplayer local system.**
 
-<img src="https://github.com/user-attachments/assets/d18984a4-b4b5-4f90-bef1-27d5c52fc595" width="400">
+<img src="Images\Network\GetLocalIpAdress.png" width="400">
 
 
 
@@ -94,7 +94,7 @@ UE_LOG(LogTemp, Log, TEXT("Connection type: %s"), *ConnectionType);
 
 **Retrieves If player has an active internet conection on his PC.**
 
-<img src="https://github.com/user-attachments/assets/1e513503-1b5c-4ccb-a835-2f51f7463c96" width="400">
+<img src="Images\Network\IsCoonectedToInternet.png" width="400">
 
 
 
@@ -102,14 +102,14 @@ UE_LOG(LogTemp, Log, TEXT("Connection type: %s"), *ConnectionType);
 
 **Output the player `wifi` Network Name AKA SSID.**
 
-<img src="https://github.com/user-attachments/assets/f3570bee-588c-4d0f-8d64-f7ab0261aa2b" width="400">
+<img src="Images\Network\GetWifiNetworkName.png" width="400">
 
 
 ## 🌀 Get Connection Type
 
 **Output the player connection type in forme of string `wifi`, `Ethernet` or `Both`.**
 
-<img src="https://github.com/user-attachments/assets/939af872-2b69-43c9-a382-33d21d95c6a7" width="400">
+<img src="Images\Network\GetConnectionType.png" width="400">
 
 
 
@@ -117,7 +117,7 @@ UE_LOG(LogTemp, Log, TEXT("Connection type: %s"), *ConnectionType);
 
 **Output the player Network Card `Wirless`, `Ethernet` Name as a  `string`.**
 
-<img src="https://github.com/user-attachments/assets/5e8551ef-3beb-4794-ba39-2c68362e2512" width="400">
+<img src="Images\Network\GetActiveNetworkCard.png" width="400">
 
 
 

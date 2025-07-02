@@ -108,7 +108,7 @@ uint32 ReadRegistryDWORD(const FString& KeyPath, const FString& ValueName, bool 
 
 **Retrieves User Windows System Build, Edition, Version, PC Name, Local User Name in forme of string.**
 
-<img src="https://github.com/user-attachments/assets/aee39a6d-e431-4ea5-8a15-9583b780965a" width="1050">
+<img src="Images\WindowsInfo.png" width="900">
 
 
 
