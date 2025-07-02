@@ -34,10 +34,6 @@ The Epic Games Store will automatically add the plugin to your engine. You'll ju
 
 ### 🔗 [Project Showcasing the plugin](https://drive.google.com/file/d/1HeZlpl12wd9fiNUboe204mw3zpwmG5jv/view?usp=sharing)
 
-
-## License
-It is completely illegal to use the Plugin without purchasing it from the fab store (unreal market), if the plugin is purchased, the buyer may have the right to modify it completely.
-
 ## Contact
 For any questions or issues, feel free to open an issue on GitHub or contact me using [Discord](https://discord.gg/YsDHqfQWqw)
 
