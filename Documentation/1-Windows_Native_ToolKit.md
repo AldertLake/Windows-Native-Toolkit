@@ -28,11 +28,11 @@ The Epic Games Store will automatically add the plugin to your engine. You'll ju
 
 ## Easy Acces Links
 
-### 🔗 [Unreal Engine Market Link](https://example.com)
+### 🔗 [Unreal Engine Market Link](https://www.fab.com/listings/db1cb6ed-ac7e-4408-a901-e45d6694cb0b)
 
-### 🔗 [Unreal Engine Market Link](https://github.com/AldertLake/Windows-Native-Toolkit/blob/main/Documentation/All_Features_And_Nodes.md)
+### 🔗 [Plugin Download Link](https://github.com/AldertLake/Windows-Native-Toolkit/releases/tag/Ver2.0)
 
-### 🔗 [Project Showcasing the plugin](https://drive.google.com/file/d/1NLRikG6El8acVvxKubecIo7LFe1OYIuj/view?usp=sharing)
+### 🔗 [Project Showcasing the plugin](https://drive.google.com/file/d/1HeZlpl12wd9fiNUboe204mw3zpwmG5jv/view?usp=sharing)
 
 
 ## License
