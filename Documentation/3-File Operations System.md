@@ -1,5 +1,4 @@
 # File Picker & File System Utility
-
 The **File Picker & File System Utility** module in Windows Native Toolkit provides Unreal Engine developers with powerful file management features, including file/folder selection, file operations, and system language detection.
 
 ## Features
@@ -65,8 +64,7 @@ void ExampleUsage()
 
 **Retrieves if user has a battery in his laptop or is using a desktop with no battery.**
 
-<img src="https://github.com/user-attachments/assets/85526236-4541-42ce-933d-9489a5303467" width="400">
-
+<img src="https://github.com/user-attachments/assets/bbfed09e-54b3-4c57-ad9a-03a64a2fda86" width="400">
 
 ### 📂 How To Specify Allowed Files Extantions ?
 
@@ -126,7 +124,7 @@ My Custom Files (*.custom)|*.custom|All Files (*.*)|*.*
 **Note: There are some restrictions on file operation. For example, the C:/ drive is severely restricted in Windows, 
 and no operations can be performed on it. Also, specifying a path before the local user folder is not possible due to the lack of administrator privileges.**
 
-<img src="https://github.com/user-attachments/assets/fddf7bdc-e361-4762-b6fe-59dfc9cf512e" width="1050">
+<img src="https://github.com/user-attachments/assets/386de9e3-cd40-41d7-badd-ad8fa419db0e" width="400">
 
 
 
@@ -136,7 +134,7 @@ and no operations can be performed on it. Also, specifying a path before the loc
 
 **Get info related to a file/folder by selecting the path of folder/file**
 
-<img src="https://github.com/user-attachments/assets/7547b2fd-62ab-45a6-9b18-0c40267dd436" width="1050">
+<img src="https://github.com/user-attachments/assets/4a75033f-f680-42c2-aad3-44bc68e5aea0" width="800">
 
 
 
@@ -146,7 +144,7 @@ and no operations can be performed on it. Also, specifying a path before the loc
 
 **Delete a folder or file by its own path, success boolean and error message if impossible.**
 
-<img src="https://github.com/user-attachments/assets/8729950c-84db-4cf5-8e6a-18b4b5147dca" width="1050">
+<img src="https://github.com/user-attachments/assets/e1f86e67-ed13-480e-890e-3e201e33500f" width="800">
 
 
 
@@ -156,7 +154,7 @@ and no operations can be performed on it. Also, specifying a path before the loc
 
 **Used to move a folder/file to a specific destination folder, output if operation succes or not and the error code if not.**
 
-<img src="https://github.com/user-attachments/assets/0b20f0a8-bb71-4f30-9f37-0cdd52480f11" width="400">
+<img src="https://github.com/user-attachments/assets/a7ef1a06-23f2-425d-8560-a075142e2769" width="400">
 
 
 
@@ -167,7 +165,7 @@ and no operations can be performed on it. Also, specifying a path before the loc
 
 **Retrieves if user has charger plugged in or not.**
 
-<img src="https://github.com/user-attachments/assets/fb6ccd46-e30d-486e-969c-90cdac67d86b" width="400">
+<img src="https://github.com/user-attachments/assets/1115d003-6b1b-4a7d-ad84-f49377617dcd" width="400">
 
 Below is a list of common keyboard layout codes that the `GetCurrentKeyboardLayout` function can return on Windows, along with their meanings. These codes represent the active input locale identifier (KLID) for the current thread.
 
