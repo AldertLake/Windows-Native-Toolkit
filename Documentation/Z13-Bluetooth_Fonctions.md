@@ -53,7 +53,7 @@ void AMyActor::BeginPlay()
 
 **Retrieves number of total devices paired to player system using bluetooth.**
 
-<img src="https://github.com/user-attachments/assets/aa083ede-2c1a-4043-b19b-302a09e51492" width="400">
+<img src="Images\Bluetooth\GetpairedBTdevicecount.png" width="400">
 
 
 
@@ -61,7 +61,7 @@ void AMyActor::BeginPlay()
 
 **Retrieves if user has bluetooth on or off in his system.**
 
-<img src="https://github.com/user-attachments/assets/3c75276b-28c4-4fb3-b9c8-743ec8938107" width="400">
+<img src="Images\Bluetooth\IsBTEnabled.png" width="400">
 
 
 ## 🔗 Get Paired Device Name
@@ -69,8 +69,7 @@ void AMyActor::BeginPlay()
 **Retrieves Paired device name by desired index, each device has an index asigned to it by default when the function is called
 for exemple if you connect firstly an BT mouse then an BT Headset, the BT mouse index is `0` and the Headset index is `1`**
 
-<img src="https://github.com/user-attachments/assets/3377a5d5-ce8f-4741-b77d-e2c4c3f9cbfc" width="400">
-
+<img src="Images\Bluetooth\GetPairedBTDeviceName.png" width="400">
 
 ## ⚠️ Limitation
 There is some **limmitation** while using this on system with more than One Bluetooth Adapter, to prevent errors and chaos i configured this to only work on **First Bluetooth Adapter**, and cases where player use Two ore more
