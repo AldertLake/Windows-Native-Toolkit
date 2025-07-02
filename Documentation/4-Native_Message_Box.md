@@ -78,8 +78,8 @@ else
 **Used to show an native Messag Box on windows, it has the option to enable 2 buttons yet you cant change buttons text, default is `Ok` & `Cancel`, the Return value can be splited or breaked to output an `First Button Pressed`
 Boolean wich help developer to identify wich button player pressed.**
 
-<img src="https://github.com/user-attachments/assets/03cd4e86-96a1-4cde-be05-e43a3024f01a" width="400">
-<img src="https://github.com/user-attachments/assets/07b22d84-a2aa-400a-883a-32becf4c1b16" width="500">
+<img src="Images/MessageBox/Shownativemessagebox.png" width="800">
+
 
 
 
@@ -89,9 +89,8 @@ Boolean wich help developer to identify wich button player pressed.**
 ## 📜 Show Message Box
 
 **Same as the first one but looks less native with the ability to modify the button text to anything you want.**
-
-<img src="https://github.com/user-attachments/assets/87769a3b-7e17-4c97-a7c5-f6fda9d9a61a" width="400">
-<img src="https://github.com/user-attachments/assets/1ead8a30-671b-4dc1-ac8c-f50cd39a2540" width="500">
+### 
+<img src="Images/MessageBox/Showmessagebox.png" width="800">
 
 
 
