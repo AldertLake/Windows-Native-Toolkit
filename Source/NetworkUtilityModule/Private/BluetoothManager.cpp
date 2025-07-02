@@ -6,114 +6,134 @@
 
 #include "BluetoothManager.h"
 
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include "Windows/WindowsHWrapper.h"
+
+#include <bthdef.h>
+#include <BluetoothAPIs.h>
+#pragma comment(lib, "Bthprops.lib")
+
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
+
+class FScopedBluetoothRadioFinder
+{
+public:
+    // Constructor finds the first radio
+    FScopedBluetoothRadioFinder()
+    {
+        BLUETOOTH_FIND_RADIO_PARAMS RadioParams = { sizeof(BLUETOOTH_FIND_RADIO_PARAMS) };
+        FindHandle = BluetoothFindFirstRadio(&RadioParams, &RadioHandle);
+    }
+
+    // Destructor ensures handles are closed
+    ~FScopedBluetoothRadioFinder()
+    {
+        if (RadioHandle)
+        {
+            CloseHandle(RadioHandle);
+        }
+        if (FindHandle)
+        {
+            BluetoothFindRadioClose(FindHandle);
+        }
+    }
+
+    // Check if the finder is valid (found a radio)
+    bool IsValid() const { return FindHandle != nullptr; }
+
+    // Get the underlying radio handle
+    HANDLE GetRadioHandle() const { return RadioHandle; }
+
+private:
+    HBLUETOOTH_RADIO_FIND FindHandle = nullptr;
+    HANDLE RadioHandle = nullptr;
+};
+
 bool UBluetoothManager::IsBluetoothEnabled()
 {
-    HANDLE hRadio = nullptr;
-    BLUETOOTH_FIND_RADIO_PARAMS btfrp = { sizeof(BLUETOOTH_FIND_RADIO_PARAMS) };
-
-    // attempt to find a Bluetooth radio ---------
-    HBLUETOOTH_RADIO_FIND hFind = BluetoothFindFirstRadio(&btfrp, &hRadio);
-    if (hFind != nullptr)
-    {
-        BluetoothFindRadioClose(hFind);
-        if (hRadio != nullptr)
-        {
-            CloseHandle(hRadio);
-        }
-        return true;
-    }
+#if PLATFORM_WINDOWS
+    FScopedBluetoothRadioFinder RadioFinder;
+    return RadioFinder.IsValid();
+#else
     return false;
+#endif
 }
-
 
 int32 UBluetoothManager::GetPairedDeviceCount()
 {
-    HANDLE hRadio = nullptr;
-    BLUETOOTH_FIND_RADIO_PARAMS btfrp = { sizeof(BLUETOOTH_FIND_RADIO_PARAMS) };
-
-    if (!InitializeBluetooth(hRadio, btfrp))
+#if PLATFORM_WINDOWS
+    FScopedBluetoothRadioFinder RadioFinder;
+    if (!RadioFinder.IsValid())
     {
         return 0;
     }
 
-    int32 deviceCount = 0;
-    BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams = { sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS) };
-    searchParams.fReturnAuthenticated = TRUE;
-    searchParams.hRadio = hRadio;
+    BLUETOOTH_DEVICE_SEARCH_PARAMS SearchParams = { sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS) };
+    SearchParams.fReturnAuthenticated = true; // Use modern C++ bool
+    SearchParams.hRadio = RadioFinder.GetRadioHandle();
 
-    BLUETOOTH_DEVICE_INFO deviceInfo = { sizeof(BLUETOOTH_DEVICE_INFO) };
-    HBLUETOOTH_DEVICE_FIND hDeviceFind = BluetoothFindFirstDevice(&searchParams, &deviceInfo);
-    if (hDeviceFind != nullptr)
+    BLUETOOTH_DEVICE_INFO DeviceInfo = { sizeof(BLUETOOTH_DEVICE_INFO) };
+    HBLUETOOTH_DEVICE_FIND DeviceFindHandle = BluetoothFindFirstDevice(&SearchParams, &DeviceInfo);
+
+    if (!DeviceFindHandle)
     {
-        do
-        {
-            deviceCount++;
-        } while (BluetoothFindNextDevice(hDeviceFind, &deviceInfo));
-        BluetoothFindDeviceClose(hDeviceFind);
+        return 0;
     }
 
-    if (hRadio != nullptr)
+    int32 DeviceCount = 0;
+    do
     {
-        CloseHandle(hRadio);
-    }
-    return deviceCount;
+        DeviceCount++;
+    } while (BluetoothFindNextDevice(DeviceFindHandle, &DeviceInfo));
+
+    BluetoothFindDeviceClose(DeviceFindHandle);
+    return DeviceCount;
+#else
+    return 0;
+#endif
 }
 
-FString UBluetoothManager::GetPairedDeviceName(int32 DeviceIndex)
+bool UBluetoothManager::GetPairedDeviceName(int32 DeviceIndex, FString& OutDeviceName)
 {
-    HANDLE hRadio = nullptr;
-    BLUETOOTH_FIND_RADIO_PARAMS btfrp = { sizeof(BLUETOOTH_FIND_RADIO_PARAMS) };
+    OutDeviceName.Empty();
 
-    if (!InitializeBluetooth(hRadio, btfrp))
-    {
-        return FString();
-    }
-
-    int32 currentIndex = 0;
-    BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams = { sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS) };
-    searchParams.fReturnAuthenticated = TRUE;
-    searchParams.hRadio = hRadio;
-
-    BLUETOOTH_DEVICE_INFO deviceInfo = { sizeof(BLUETOOTH_DEVICE_INFO) };
-    HBLUETOOTH_DEVICE_FIND hDeviceFind = BluetoothFindFirstDevice(&searchParams, &deviceInfo);
-    if (hDeviceFind != nullptr)
-    {
-        do
-        {
-            if (currentIndex == DeviceIndex)
-            {
-                FString deviceName = FString(deviceInfo.szName);
-                BluetoothFindDeviceClose(hDeviceFind);
-                if (hRadio != nullptr)
-                {
-                    CloseHandle(hRadio);
-                }
-                return deviceName;
-            }
-            currentIndex++;
-        } while (BluetoothFindNextDevice(hDeviceFind, &deviceInfo));
-        BluetoothFindDeviceClose(hDeviceFind);
-    }
-
-    if (hRadio != nullptr)
-    {
-        CloseHandle(hRadio);
-    }
-    return FString(); // Return empty string if index is invalid, Uncomment the code below for custom mssg.
-
-    // return FString(TEXT("invalid index")); // Use this to return an custom text for invalid index
-    // if using this, delete the first return value i mean u really dont wanna get out with two string return values LOL
-}
-
-bool UBluetoothManager::InitializeBluetooth(HANDLE& hRadio, BLUETOOTH_FIND_RADIO_PARAMS& btfrp)
-{
-    HBLUETOOTH_RADIO_FIND hFind = BluetoothFindFirstRadio(&btfrp, &hRadio);
-    if (hFind == nullptr)
+#if PLATFORM_WINDOWS
+    FScopedBluetoothRadioFinder RadioFinder;
+    if (!RadioFinder.IsValid() || DeviceIndex < 0)
     {
         return false;
     }
-    BluetoothFindRadioClose(hFind);
-    return true;
+
+    BLUETOOTH_DEVICE_SEARCH_PARAMS SearchParams = { sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS) };
+    SearchParams.fReturnAuthenticated = true; // Use modern C++ bool
+    SearchParams.hRadio = RadioFinder.GetRadioHandle();
+
+    BLUETOOTH_DEVICE_INFO DeviceInfo = { sizeof(BLUETOOTH_DEVICE_INFO) };
+    HBLUETOOTH_DEVICE_FIND DeviceFindHandle = BluetoothFindFirstDevice(&SearchParams, &DeviceInfo);
+
+    if (!DeviceFindHandle)
+    {
+        return false;
+    }
+
+    int32 CurrentIndex = 0;
+    bool bDeviceFound = false;
+    do
+    {
+        if (CurrentIndex == DeviceIndex)
+        {
+            OutDeviceName = FString(DeviceInfo.szName);
+            bDeviceFound = true;
+            break; // Found the device, no need to continue looping
+        }
+        CurrentIndex++;
+    } while (BluetoothFindNextDevice(DeviceFindHandle, &DeviceInfo));
+
+    BluetoothFindDeviceClose(DeviceFindHandle);
+    return bDeviceFound;
+#else
+    return false;
+#endif
 }
-
-

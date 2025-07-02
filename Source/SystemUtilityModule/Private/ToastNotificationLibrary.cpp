@@ -11,7 +11,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/CoreDelegates.h"
 #include "Windows/HideWindowsPlatformTypes.h"
-
+#include <string> // Added for std::wstring
 
 static NOTIFYICONDATAW TrayIconData = { 0 };
 static bool bIsTrayIconInitialized = false;
@@ -95,7 +95,7 @@ void UToastNotificationLibrary::DisplayTrayNotification(const FString& Title, co
     TrayIconData.uTimeout = 5000; // 5-second timeout
 
     // Set tooltip (limited to 128 characters)
-    wcsncpy_s(TrayIconData.szTip, GameTitleW.c_str(), 128);
+    wcsncpy_s(TrayIconData.szTip, 128, GameTitleW.c_str(), _TRUNCATE);
 
     // Add the tray icon
     if (!Shell_NotifyIconW(NIM_ADD, &TrayIconData))
@@ -121,8 +121,8 @@ void UToastNotificationLibrary::DisplayTrayNotification(const FString& Title, co
     }
 
     // Set title and message (with length limits)
-    wcsncpy_s(TrayIconData.szInfoTitle, *Title, 64); // Title limited to 64 chars
-    wcsncpy_s(TrayIconData.szInfo, *Message, 256);   // Message limited to 256 chars
+    wcsncpy_s(TrayIconData.szInfoTitle, 64, *Title, _TRUNCATE); // Title limited to 64 chars
+    wcsncpy_s(TrayIconData.szInfo, 256, *Message, _TRUNCATE);   // Message limited to 256 chars
 
     // Show the notification
     Shell_NotifyIconW(NIM_MODIFY, &TrayIconData);

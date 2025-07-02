@@ -12,6 +12,7 @@
 #include <dxgi1_4.h> 
 #include <Xinput.h>    
 #include <winreg.h>    
+#include <vector>
 #include "Windows/HideWindowsPlatformTypes.h"
 
 // Memory Information
