@@ -14,3 +14,4 @@ The Windows Native Toolkit provides Blueprint nodes for accessing native Windows
 
 ## Note
 #### I would accept commits to this repository to improve the plugin.
+
