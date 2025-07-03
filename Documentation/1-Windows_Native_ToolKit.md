@@ -26,7 +26,7 @@ The Epic Games Store will automatically add the plugin to your engine. You'll ju
 2. Place the `Windows_Native_Toolkit` folder in your Unreal Engine project's `Plugins` directory.
 3. Open your Unreal Engine project and enable the plugin from the Plugin Manager (it will be enabled by default).
 
-## Easy Acces Links
+## Get The Plugin
 
 ### 🔗 [Unreal Engine Market Link](https://www.fab.com/listings/db1cb6ed-ac7e-4408-a901-e45d6694cb0b)
 
