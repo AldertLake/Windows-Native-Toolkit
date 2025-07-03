@@ -26,17 +26,13 @@ The Epic Games Store will automatically add the plugin to your engine. You'll ju
 2. Place the `Windows_Native_Toolkit` folder in your Unreal Engine project's `Plugins` directory.
 3. Open your Unreal Engine project and enable the plugin from the Plugin Manager (it will be enabled by default).
 
-## Easy Acces Links
+## Get The Plugin
 
-### 🔗 [Unreal Engine Market Link](https://example.com)
+### 🔗 [Unreal Engine Market Link](https://www.fab.com/listings/db1cb6ed-ac7e-4408-a901-e45d6694cb0b)
 
-### 🔗 [Unreal Engine Market Link](https://github.com/AldertLake/Windows-Native-Toolkit/blob/main/Documentation/All_Features_And_Nodes.md)
+### 🔗 [Plugin Download Link](https://github.com/AldertLake/Windows-Native-Toolkit/releases/tag/Ver2.0)
 
-### 🔗 [Project Showcasing the plugin](https://drive.google.com/file/d/1NLRikG6El8acVvxKubecIo7LFe1OYIuj/view?usp=sharing)
-
-
-## License
-It is completely illegal to use the Plugin without purchasing it from the fab store (unreal market), if the plugin is purchased, the buyer may have the right to modify it completely.
+### 🔗 [Project Showcasing the plugin](https://drive.google.com/file/d/1HeZlpl12wd9fiNUboe204mw3zpwmG5jv/view?usp=sharing)
 
 ## Contact
 For any questions or issues, feel free to open an issue on GitHub or contact me using [Discord](https://discord.gg/YsDHqfQWqw)
