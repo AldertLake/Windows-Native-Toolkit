@@ -26,8 +26,7 @@ public class NetworkUtilityModule : ModuleRules
                 "Iphlpapi.lib",    // NetworkAdapters
                 "Ws2_32.lib",     // Winsock for networking
                 "Wlanapi.lib",   // WLAN (WiFi scanning)
-                "Wininet.lib",   // Internet functions (e.g. InternetCheckConnection)
-                "Bthprops.lib" //For bluetooth
+                "Wininet.lib"   // Internet functions (e.g. InternetCheckConnection)
             });
         }
     }
