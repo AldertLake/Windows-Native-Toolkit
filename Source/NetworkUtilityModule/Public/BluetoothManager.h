@@ -8,11 +8,6 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
-#include <Windows.h> 
-#include <bthdef.h>
-#include <BluetoothAPIs.h>
-#pragma comment(lib, "Bthprops.lib")
-
 #include "BluetoothManager.generated.h"
 
 UCLASS()
@@ -22,22 +17,15 @@ class UBluetoothManager : public UBlueprintFunctionLibrary
 
 public:
 
-    //Verify If Bluetooth Is Enabled
     UFUNCTION(BlueprintPure, Category = "Bluetooth Functions")
     static bool IsBluetoothEnabled();
 
-    //Get How many device is paired 
+    // Number of paired devices (returns 0 on failure)
     UFUNCTION(BlueprintPure, Category = "Bluetooth Functions")
     static int32 GetPairedDeviceCount();
 
-    //Get The Paired Device Name
+    // Get the paired device name by index. Returns empty FString on invalid index or error.
     UFUNCTION(BlueprintPure, Category = "Bluetooth Functions")
     static FString GetPairedDeviceName(int32 DeviceIndex);
-
-private:
-    // Helper function to initialize Bluetooth and get handle
-    static bool InitializeBluetooth(HANDLE& hRadio, BLUETOOTH_FIND_RADIO_PARAMS& btfrp);
-
-
+ 
 };
-

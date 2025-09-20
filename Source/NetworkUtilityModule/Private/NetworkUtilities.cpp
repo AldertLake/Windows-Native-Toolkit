@@ -5,23 +5,14 @@
 // ---------------------------------------------------
 
 #include "NetworkUtilities.h"
-
 #include "Windows/AllowWindowsPlatformTypes.h"
-#include "Windows/WindowsHWrapper.h"  
-
 #include <winsock2.h>
+#include <ws2tcpip.h>
+#include "Windows/WindowsHWrapper.h"
 #include <iphlpapi.h>
 #include <wininet.h>
-#include <ws2tcpip.h>
-#include <wlanapi.h>  
-
-#pragma comment(lib, "iphlpapi.lib")  
-#pragma comment(lib, "wininet.lib")   
-#pragma comment(lib, "ws2_32.lib")    
-#pragma comment(lib, "wlanapi.lib")    
-
+#include <wlanapi.h>
 #include "Windows/HideWindowsPlatformTypes.h"
-
 
 FString UNetworkUtilities::GetLocalIpAddress()
 {

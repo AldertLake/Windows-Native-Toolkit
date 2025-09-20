@@ -1,8 +1,8 @@
 {
 	"FileVersion": 3,
 	"Version": 2,
-	"VersionName": "2.1",
-	"FriendlyName": "Windows Toolkit",
+	"VersionName": "2.2",
+	"FriendlyName": "Windows Native Toolkit",
 	"Description": "The Windows Toolkit provides Blueprint nodes for accessing native Windows features like hardware info, keyboard layout, message boxes, and file pickers. It streamlines Unreal Engine development by integrating essential system-level functionalities.",
 	"Category": "Windows Tools",
 	"CreatedBy": "AldertLake",
