@@ -5,46 +5,95 @@
 // ---------------------------------------------------
 
 #include "HardwareInfoLibrary.h"
-#include "Runtime/Core/Public/Windows/WindowsPlatformMisc.h"
+
+#include "HardwareInfo.h"            
+#include "RHI.h"                   
+#include "HAL/PlatformMisc.h"      
+#include "Misc/ConfigCacheIni.h"    
+#include "Misc/CoreDelegates.h" 
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
-#include "Windows/MinWindows.h"
-#include <dxgi1_4.h> 
-#include <Xinput.h>    
-#include <winreg.h>    
-#include <vector>
-#include <pdh.h>
-#include <wchar.h>
-#pragma comment(lib, "pdh.lib")
-//DXGI & PDH
-#include <dxgi.h>
-#include <dxgi1_6.h>
-#include <pdhmsg.h>
-#pragma comment(lib, "dxgi.lib")
+#include "Windows/WindowsSystemIncludes.h"
+#include <dxgi1_4.h>
+#include <Xinput.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
-#include "HardwareInfo.h"
-#include "Misc/CommandLine.h"
-#include "Misc/ConfigCacheIni.h"
-#include "Misc/CoreDelegates.h"
+// --- PRIVATE HELPER FUNCTION ---
+
+static bool QueryGPUStats(int32& OutTotalMB, int32& OutBudgetMB, int32& OutUsageMB)
+{
+    OutTotalMB = 0;
+    OutBudgetMB = 0;
+    OutUsageMB = 0;
+
+#if PLATFORM_WINDOWS
+    IDXGIFactory4* pFactory = nullptr;
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory4), (void**)&pFactory)))
+    {
+        return false;
+    }
+
+    IDXGIAdapter3* pAdapter = nullptr;
+    uint32 AdapterIndex = 0;
+    bool bFound = false;
+
+    const uint32 TargetVendorId = GRHIVendorId;
+
+    while (pFactory->EnumAdapters(AdapterIndex, reinterpret_cast<IDXGIAdapter**>(&pAdapter)) != DXGI_ERROR_NOT_FOUND)
+    {
+        DXGI_ADAPTER_DESC desc;
+        pAdapter->GetDesc(&desc);
+
+        if (desc.VendorId == TargetVendorId || TargetVendorId == 0)
+        {
+            OutTotalMB = static_cast<int32>(desc.DedicatedVideoMemory / 1024 / 1024);
+
+            DXGI_QUERY_VIDEO_MEMORY_INFO videoMemoryInfo;
+            if (SUCCEEDED(pAdapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &videoMemoryInfo)))
+            {
+                OutUsageMB = static_cast<int32>(videoMemoryInfo.CurrentUsage / 1024 / 1024);
+                OutBudgetMB = static_cast<int32>(videoMemoryInfo.Budget / 1024 / 1024);
+            }
+            bFound = true;
+        }
+
+        pAdapter->Release();
+        if (bFound) break;
+        AdapterIndex++;
+    }
+
+    pFactory->Release();
+    return bFound;
+#else
+    return false;
+#endif
+}
 
 
-// Memory Information
-void USystemInfoBPLibrary::GetMemoryInfo(int32& TotalPhysicalMB, int32& UsedPhysicalMB, int32& FreePhysicalMB,
-    int32& TotalVirtualMB, int32& UsedVirtualMB, int32& FreeVirtualMB)
+
+// --- PUBLIC BP FUNCTIONS ---
+
+void USystemInfoBPLibrary::GetMemoryInfo(int64& TotalPhysicalMB, int64& UsedPhysicalMB, int64& FreePhysicalMB,
+    int64& TotalVirtualMB, int64& UsedVirtualMB, int64& FreeVirtualMB)
 {
     MEMORYSTATUSEX memInfo;
     memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+
     if (GlobalMemoryStatusEx(&memInfo))
     {
-        TotalPhysicalMB = static_cast<int32>(memInfo.ullTotalPhys >> 20);
-        FreePhysicalMB = static_cast<int32>(memInfo.ullAvailPhys >> 20);
+        // 1. PHYSICAL MEMORY (RAM)
+        // We use >> 20 to convert Bytes to MiB (matches Task Manager "MB")
+        TotalPhysicalMB = static_cast<int64>(memInfo.ullTotalPhys >> 20);
+        FreePhysicalMB = static_cast<int64>(memInfo.ullAvailPhys >> 20);
         UsedPhysicalMB = TotalPhysicalMB - FreePhysicalMB;
 
-        TotalVirtualMB = static_cast<int32>(memInfo.ullTotalVirtual >> 20);
-        FreeVirtualMB = static_cast<int32>(memInfo.ullAvailVirtual >> 20);
+        // 2. VIRTUAL MEMORY (Commit Limit / Page File)
+        // CRITICAL FIX: Use ullTotalPageFile, NOT ullTotalVirtual
+        // ullTotalPageFile = Physical RAM + Size of Page File on Disk
+        TotalVirtualMB = static_cast<int64>(memInfo.ullTotalPageFile >> 20);
+        FreeVirtualMB = static_cast<int64>(memInfo.ullAvailPageFile >> 20);
         UsedVirtualMB = TotalVirtualMB - FreeVirtualMB;
     }
     else
@@ -54,71 +103,43 @@ void USystemInfoBPLibrary::GetMemoryInfo(int32& TotalPhysicalMB, int32& UsedPhys
     }
 }
 
-// CPU Information
-void USystemInfoBPLibrary::GetCPUInfo(FString& Name, FString& Manufacturer, int32& Cores, int32& Threads)
+void USystemInfoBPLibrary::GetCPUInfo(FString& DeviceName, ECPUVendor& Vendor, int32& PhysicalCores, int32& LogicalThreads)
 {
-    Name = TEXT("Unknown");
-    Manufacturer = TEXT("Unknown");
-    Cores = Threads = 0;
+    DeviceName = FPlatformMisc::GetCPUBrand();
 
-    // Retrieve CPU name from registry
-    HKEY hKey;
-    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    if (DeviceName.IsEmpty())
     {
-        TCHAR Buffer[512];
-        DWORD BufferSize = sizeof(Buffer);
-        if (RegQueryValueEx(hKey, TEXT("ProcessorNameString"), NULL, NULL, (LPBYTE)Buffer, &BufferSize) == ERROR_SUCCESS)
-        {
-            Name = FString(Buffer).TrimStartAndEnd();
-        }
-        RegCloseKey(hKey);
+        DeviceName = TEXT("Unknown Processor");
     }
 
-    // Get logical processor count
-    SYSTEM_INFO sysInfo;
-    GetSystemInfo(&sysInfo);
-    Threads = sysInfo.dwNumberOfProcessors;
+    PhysicalCores = FPlatformMisc::NumberOfCores();
 
-    // Get physical core count
-    DWORD length = 0;
-    GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &length);
-    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+    LogicalThreads = FPlatformMisc::NumberOfCoresIncludingHyperthreads();
+
+    FString VendorString = FPlatformMisc::GetCPUVendor();
+
+    if (VendorString.Equals(TEXT("GenuineIntel"), ESearchCase::IgnoreCase) || DeviceName.Contains(TEXT("Intel")))
     {
-        std::vector<BYTE> buffer(length);
-        if (GetLogicalProcessorInformationEx(RelationProcessorCore, reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data()), &length))
-        {
-            Cores = 0;
-            DWORD offset = 0;
-            while (offset < length)
-            {
-                auto info = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data() + offset);
-                if (info->Relationship == RelationProcessorCore)
-                {
-                    Cores++;
-                }
-                offset += info->Size;
-            }
-        }
+        Vendor = ECPUVendor::Intel;
     }
-
-    // Retrieve manufacturer from registry with fallback
-    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    else if (VendorString.Equals(TEXT("AuthenticAMD"), ESearchCase::IgnoreCase) || DeviceName.Contains(TEXT("AMD")))
     {
-        TCHAR Buffer[512];
-        DWORD BufferSize = sizeof(Buffer);
-        if (RegQueryValueEx(hKey, TEXT("VendorIdentifier"), NULL, NULL, (LPBYTE)Buffer, &BufferSize) == ERROR_SUCCESS)
-        {
-            Manufacturer = FString(Buffer).TrimStartAndEnd();
-        }
-        RegCloseKey(hKey);
+        Vendor = ECPUVendor::AMD;
+    }
+    else if (DeviceName.Contains(TEXT("Apple")))
+    {
+        Vendor = ECPUVendor::Apple;
+    }
+    else if (DeviceName.Contains(TEXT("Snapdragon")) || DeviceName.Contains(TEXT("Qualcomm")))
+    {
+        Vendor = ECPUVendor::Qualcomm;
     }
     else
     {
-        Manufacturer = FPlatformMisc::GetCPUVendor();
+        Vendor = ECPUVendor::Generic;
     }
 }
 
-//Decapreted function to get all in one gpu info (Using Only DXGI)
 void USystemInfoBPLibrary::GetGPUInfo(FString& Name, FString& Manufacturer, int32& TotalVRAMMB, int32& UsedVRAMMB, int32& FreeVRAMMB)
 {
     Name = TEXT("Unknown");
@@ -165,213 +186,167 @@ void USystemInfoBPLibrary::GetGPUInfo(FString& Name, FString& Manufacturer, int3
     pFactory->Release();
 }
 
-//Get GPU Name & Manufacturer
-void USystemInfoBPLibrary::GetGPUNameAndManufacturer(FString& Name, FString& Manufacturer)
+void USystemInfoBPLibrary::GetGPUNameAndManufacturer(FString& DeviceName, EGPUVendor& Manufacturer)
 {
-    Name = TEXT("Unknown");
-    Manufacturer = TEXT("Unknown");
+    DeviceName = GRHIAdapterName;
 
-#if PLATFORM_WINDOWS
-    IDXGIFactory* pFactory = nullptr;
-    if (SUCCEEDED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&pFactory)))
+    if (DeviceName.IsEmpty())
     {
-        IDXGIAdapter* pAdapter = nullptr;
-        if (SUCCEEDED(pFactory->EnumAdapters(0, &pAdapter)))
-        {
-            DXGI_ADAPTER_DESC desc;
-            if (SUCCEEDED(pAdapter->GetDesc(&desc)))
-            {
-                Name = FString(desc.Description);
-                switch (desc.VendorId)
-                {
-                case 0x10DE: Manufacturer = TEXT("NVIDIA"); break;
-                case 0x1002: Manufacturer = TEXT("AMD"); break;
-                case 0x8086: Manufacturer = TEXT("Intel"); break;
-                case 0x1414: Manufacturer = TEXT("Microsoft"); break;
-                default:     Manufacturer = TEXT("Unknown"); break;
-                }
-            }
-            pAdapter->Release();
-        }
-        pFactory->Release();
+        DeviceName = TEXT("Unknown Graphics Adapter");
     }
-#endif
+
+    const uint32 VendorId = GRHIVendorId;
+
+    switch (VendorId)
+    {
+    case 0x10DE:
+        Manufacturer = EGPUVendor::Nvidia;
+        break;
+
+    case 0x1002:
+        Manufacturer = EGPUVendor::AMD;
+        break;
+
+    case 0x8086:
+        Manufacturer = EGPUVendor::Intel;
+        break;
+
+    case 0x5143:
+        Manufacturer = EGPUVendor::Qualcomm;
+        break;
+
+    default:
+        Manufacturer = EGPUVendor::Unknown;
+        break;
+    }
 }
 
-//Get Total VRAM in MB (Using DXGI & PDH)
 int32 USystemInfoBPLibrary::GetTotalVRAMMB()
 {
-    int32 TotalVRAMMB = 0;
+    // We cache this value because Total VRAM never changes while the game is running.
+    static int32 CachedTotalVRAM = -1;
 
-#if PLATFORM_WINDOWS
-    IDXGIFactory* pFactory = nullptr;
-    if (SUCCEEDED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&pFactory)))
+    if (CachedTotalVRAM < 0)
     {
-        IDXGIAdapter* pAdapter = nullptr;
-        if (SUCCEEDED(pFactory->EnumAdapters(0, &pAdapter)))
-        {
-            DXGI_ADAPTER_DESC desc;
-            if (SUCCEEDED(pAdapter->GetDesc(&desc)))
-            {
-                TotalVRAMMB = static_cast<int32>(desc.DedicatedVideoMemory / 1024 / 1024);
-            }
-            pAdapter->Release();
-        }
-        pFactory->Release();
+        int32 Budget, Usage;
+        QueryGPUStats(CachedTotalVRAM, Budget, Usage);
     }
-#endif
 
-    return TotalVRAMMB;
+    return CachedTotalVRAM;
 }
 
-//Get Used VRAM in MB (adapter-level) (Using DXGI & PDH)
-int32 USystemInfoBPLibrary::GetUsedVRAMMB()
-{
-    int32 UsedVRAMMB = 0;
-
-#if PLATFORM_WINDOWS
-    const wchar_t* pattern = L"\\GPU Adapter Memory(*)\\Dedicated Usage";
-
-    DWORD requiredChars = 0;
-    PDH_STATUS ps = PdhExpandWildCardPathW(nullptr, pattern, nullptr, &requiredChars, 0);
-    const PDH_STATUS PDH_MORE_DATA_NUM = 0x800007D2u;
-
-    if (ps == PDH_MORE_DATA_NUM && requiredChars > 0)
-    {
-        std::vector<wchar_t> buffer(requiredChars);
-        if (PdhExpandWildCardPathW(nullptr, pattern, buffer.data(), &requiredChars, 0) == ERROR_SUCCESS)
-        {
-            wchar_t* entry = buffer.data();
-            if (*entry != L'\0')
-            {
-                PDH_HQUERY pdhQuery = nullptr;
-                PDH_HCOUNTER pdhCounter = nullptr;
-                if (PdhOpenQueryW(nullptr, 0, &pdhQuery) == ERROR_SUCCESS)
-                {
-                    if (PdhAddCounterW(pdhQuery, entry, 0, &pdhCounter) == ERROR_SUCCESS)
-                    {
-                        if (PdhCollectQueryData(pdhQuery) == ERROR_SUCCESS)
-                        {
-                            FPlatformProcess::Sleep(0.1f);
-                            if (PdhCollectQueryData(pdhQuery) == ERROR_SUCCESS)
-                            {
-                                PDH_FMT_COUNTERVALUE counterValue;
-                                if (PdhGetFormattedCounterValue(pdhCounter, PDH_FMT_LARGE, nullptr, &counterValue) == ERROR_SUCCESS
-                                    && counterValue.CStatus == ERROR_SUCCESS)
-                                {
-                                    UsedVRAMMB = static_cast<int32>(counterValue.largeValue / 1024 / 1024);
-                                }
-                            }
-                        }
-                        PdhRemoveCounter(pdhCounter);
-                    }
-                    PdhCloseQuery(pdhQuery);
-                }
-            }
-        }
-    }
-#endif
-
-    return UsedVRAMMB;
-}
-
-//Get Game VRAM Usage in MB (process-level) (Using DXGI & PDH)
 int32 USystemInfoBPLibrary::GetGameVRAMUsageMB()
 {
-    int32 GameVRAMMB = 0;
-
-#if PLATFORM_WINDOWS
-    const wchar_t* pattern = L"\\GPU Process Memory(*)\\Dedicated Usage";
-
-    DWORD pid = GetCurrentProcessId();
-    wchar_t pidBuf[32];
-    swprintf_s(pidBuf, _countof(pidBuf), L"pid_%lu", static_cast<unsigned long>(pid));
-
-    DWORD requiredChars = 0;
-    PDH_STATUS ps = PdhExpandWildCardPathW(nullptr, pattern, nullptr, &requiredChars, 0);
-    const PDH_STATUS PDH_MORE_DATA_NUM = 0x800007D2u;
-
-    if (ps == PDH_MORE_DATA_NUM && requiredChars > 0)
+    int32 Total, Budget, Usage;
+    if (QueryGPUStats(Total, Budget, Usage))
     {
-        std::vector<wchar_t> buffer(requiredChars);
-        if (PdhExpandWildCardPathW(nullptr, pattern, buffer.data(), &requiredChars, 0) == ERROR_SUCCESS)
+        return Usage;
+    }
+    return 0;
+}
+
+int32 USystemInfoBPLibrary::GetUsedVRAMMB()
+{
+    int32 Total, Budget, Usage;
+    if (QueryGPUStats(Total, Budget, Usage))
+    {
+
+
+        int32 SystemOverhead = Total - Budget;
+        int32 GlobalUsed = SystemOverhead + Usage;
+
+        if (GlobalUsed > Total) GlobalUsed = Total;
+        if (GlobalUsed < 0) GlobalUsed = 0;
+
+        return GlobalUsed;
+    }
+    return 0;
+}
+
+void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, bool& HasKeyboard)
+{
+    UINT nDevices = 0;
+    // Get the number of devices
+    GetRawInputDeviceList(NULL, &nDevices, sizeof(RAWINPUTDEVICELIST));
+
+    if (nDevices == 0)
+    {
+        HasMouse = false;
+        HasKeyboard = false;
+    }
+    else
+    {
+        // Allocate memory for the device list
+        TArray<RAWINPUTDEVICELIST> DeviceList;
+        DeviceList.SetNumUninitialized(nDevices);
+
+        // Retrieve the device list
+        GetRawInputDeviceList(DeviceList.GetData(), &nDevices, sizeof(RAWINPUTDEVICELIST));
+
+        HasMouse = false;
+        HasKeyboard = false;
+
+        for (UINT i = 0; i < nDevices; i++)
         {
-            wchar_t* entry = buffer.data();
-            while (*entry != L'\0')
+            if (DeviceList[i].dwType == RIM_TYPEMOUSE)
             {
-                if (wcsstr(entry, pidBuf) != nullptr) // match our process
-                {
-                    PDH_HQUERY pdhQuery = nullptr;
-                    PDH_HCOUNTER pdhCounter = nullptr;
-                    if (PdhOpenQueryW(nullptr, 0, &pdhQuery) == ERROR_SUCCESS)
-                    {
-                        if (PdhAddCounterW(pdhQuery, entry, 0, &pdhCounter) == ERROR_SUCCESS)
-                        {
-                            if (PdhCollectQueryData(pdhQuery) == ERROR_SUCCESS)
-                            {
-                                FPlatformProcess::Sleep(0.1f);
-                                if (PdhCollectQueryData(pdhQuery) == ERROR_SUCCESS)
-                                {
-                                    PDH_FMT_COUNTERVALUE counterValue;
-                                    if (PdhGetFormattedCounterValue(pdhCounter, PDH_FMT_LARGE, nullptr, &counterValue) == ERROR_SUCCESS
-                                        && counterValue.CStatus == ERROR_SUCCESS)
-                                    {
-                                        GameVRAMMB = static_cast<int32>(counterValue.largeValue / 1024 / 1024);
-                                    }
-                                }
-                            }
-                            PdhRemoveCounter(pdhCounter);
-                        }
-                        PdhCloseQuery(pdhQuery);
-                    }
-                    break;
-                }
-                entry += wcslen(entry) + 1;
+
+                HasMouse = true;
+            }
+            else if (DeviceList[i].dwType == RIM_TYPEKEYBOARD)
+            {
+                HasKeyboard = true;
             }
         }
     }
-#endif
+    HasGamepad = false;
 
-    return GameVRAMMB;
-}
-
-// Input Devices Reporter
-void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, bool& HasKeyboard)
-{
-    // Gamepad detection using XInput
-    XINPUT_STATE state;
-    HasGamepad = (XInputGetState(0, &state) == ERROR_SUCCESS);
-
-    // Mouse detection
-    HasMouse = (GetSystemMetrics(SM_MOUSEPRESENT) != 0);
-
-    // Keyboard detection (assumed true on Windows)
-    HasKeyboard = true;
-}
-
-//Retun the current in use RHI
-FString USystemInfoBPLibrary::GetRHIName()
-{
-    FString RHI_Info = FHardwareInfo::GetHardwareInfo(NAME_RHI);
-    int32 SpacePos = RHI_Info.Find(TEXT(" "));
-    if (SpacePos != INDEX_NONE)
+    for (DWORD i = 0; i < XUSER_MAX_COUNT; i++)
     {
-        return RHI_Info.Left(SpacePos);
+        XINPUT_STATE State;
+        ZeroMemory(&State, sizeof(XINPUT_STATE));
+
+        if (XInputGetState(i, &State) == ERROR_SUCCESS)
+        {
+            HasGamepad = true;
+            break; // Found at least one controller
+        }
     }
-    return RHI_Info.IsEmpty() ? FString(TEXT("Unknown")) : RHI_Info;
+
+    // NOTE: This still only finds XInput (Xbox) devices. 
+    // To find PlayStation (DirectInput) controllers without Steam/DS4Windows, 
+    // you would need to parse the RawInput list above for HID devices with "Joystick" usage pages.
 }
 
-//Restart the game, it work by simply launching new game instance then close the current one.
+EGraphicsRHI USystemInfoBPLibrary::GetRHIName()
+{
+    // Safety Check: If running on a server or commandlet with no RHI
+    if (!GDynamicRHI)
+    {
+        return EGraphicsRHI::Unknown;
+    }
+
+    // Get the authoritative name directly from the driver
+    FString RHIName = FString(GDynamicRHI->GetName());
+
+    // Map to Enum
+    if (RHIName == TEXT("D3D12"))           return EGraphicsRHI::DirectX12;
+    if (RHIName == TEXT("D3D11"))           return EGraphicsRHI::DirectX11;
+    if (RHIName.StartsWith(TEXT("Vulkan"))) return EGraphicsRHI::Vulkan;
+    if (RHIName == TEXT("Metal"))           return EGraphicsRHI::Metal;
+    if (RHIName.Contains(TEXT("OpenGL")))   return EGraphicsRHI::OpenGL;
+
+    return EGraphicsRHI::Unknown;
+}
+
 void USystemInfoBPLibrary::RestartGameWithCommandLine(const FString& ExtraCommandLine)
 {
-    const FString RestartSentinel = TEXT("--restarted");
+#if PLATFORM_WINDOWS
+    static bool bIsRestarting = false;
+    if (bIsRestarting) { return; }
 
-    if (ExtraCommandLine.Contains(RestartSentinel, ESearchCase::IgnoreCase) ||
-        FString(FCommandLine::Get()).Contains(RestartSentinel, ESearchCase::IgnoreCase))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Restart aborted: restart sentinel already present."));
-        return;
-    }
+    const FString RestartSentinel = TEXT("--restarted");
+    if (ExtraCommandLine.Contains(RestartSentinel, ESearchCase::IgnoreCase)) { return; }
 
     FString Sanitized;
     Sanitized.Reserve(ExtraCommandLine.Len());
@@ -396,36 +371,24 @@ void USystemInfoBPLibrary::RestartGameWithCommandLine(const FString& ExtraComman
         CmdLine.TrimEndInline();
         CmdLine += TEXT(" ");
     }
+
     CmdLine += RestartSentinel;
+    bIsRestarting = true;
 
     FCoreDelegates::OnPreExit.Broadcast();
-    if (GConfig)
-    {
-        GConfig->Flush(false, GEngineIni);
-    }
+    if (GConfig) { GConfig->Flush(false, GEngineIni); }
 
     const FString ExePath = FPlatformProcess::ExecutablePath();
     if (ExePath.IsEmpty())
     {
-        UE_LOG(LogTemp, Error, TEXT("Restart aborted: cannot determine executable path."));
+        bIsRestarting = false;
         return;
     }
 
-    FProcHandle ProcHandle = FPlatformProcess::CreateProc(
-        *ExePath,
-        *CmdLine,
-        true,
-        false,
-        false,
-        nullptr,
-        0,
-        nullptr,
-        nullptr
-    );
-
+    FProcHandle ProcHandle = FPlatformProcess::CreateProc(*ExePath, *CmdLine, true, false, false, nullptr, 0, nullptr, nullptr);
     if (!ProcHandle.IsValid())
     {
-        UE_LOG(LogTemp, Error, TEXT("Restart failed: CreateProc returned invalid handle."));
+        bIsRestarting = false;
         return;
     }
 
@@ -445,21 +408,12 @@ void USystemInfoBPLibrary::RestartGameWithCommandLine(const FString& ExtraComman
 
     if (bChildRunning)
     {
-        UE_LOG(LogTemp, Log, TEXT("Restart successful: spawned child process, exiting gracefully."));
         FPlatformProcess::CloseProc(ProcHandle);
         FPlatformMisc::RequestExit(true);
         return;
     }
 
-    int32 ReturnCode = 0;
-    bool bHasReturn = FPlatformProcess::GetProcReturnCode(ProcHandle, &ReturnCode);
-    if (bHasReturn)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Restart failed: child exited immediately with code %d."), ReturnCode);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Restart failed: child not running after %.1f seconds (timeout)."), TimeoutSeconds);
-    }
     FPlatformProcess::CloseProc(ProcHandle);
+    bIsRestarting = false;
+#endif
 }

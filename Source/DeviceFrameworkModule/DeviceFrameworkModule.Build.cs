@@ -16,17 +16,20 @@ public class DeviceFrameworkModule : ModuleRules
         {
             "Core",
             "CoreUObject",
-            "Engine"
+            "Engine",
+            "RHI",
+            "RenderCore"
         });
 
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             PublicSystemLibraries.AddRange(new string[]
             {
-                "Winmm.lib", 
-                "XInput.lib",   
-                "Advapi32.lib", 
-                "dxgi.lib"      
+                "Winmm.lib",
+                "User32.lib",
+                "XInput.lib",
+                "Advapi32.lib",
+                "dxgi.lib"
             });
         }
     }
