@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 2,
-	"VersionName": "2.2",
+	"VersionName": "2.3",
 	"FriendlyName": "Windows Native Toolkit",
 	"Description": "The Windows Toolkit provides Blueprint nodes for accessing native Windows features like hardware info, keyboard layout, message boxes, and file pickers. It streamlines Unreal Engine development by integrating essential system-level functionalities.",
 	"Category": "Windows Tools",
@@ -15,6 +15,14 @@
 	"Installed": true,
 	"FabURL": "com.epicgames.launcher://ue/Fab/product/af2d4c25-08a6-4db3-bef6-b0e0f8ed88a9",
 	"Modules": [
+				{
+			"Name": "EditorOnly",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
 		{
 			"Name": "SystemUtilityModule",
 			"Type": "Runtime",
