@@ -106,7 +106,7 @@ void USystemInfoBPLibrary::GetMemoryInfo(int64& TotalPhysicalMB, int64& UsedPhys
 
 void USystemInfoBPLibrary::GetCPUInfo(FString& DeviceName, ECPUVendor& Vendor, int32& PhysicalCores, int32& LogicalThreads)
 {
-    DeviceName = FPlatformMisc::GetCPUBrand();
+    DeviceName = FPlatformMisc::GetCPUBrand().TrimStartAndEnd();
 
     if (DeviceName.IsEmpty())
     {
