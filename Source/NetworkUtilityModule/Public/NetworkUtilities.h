@@ -18,22 +18,22 @@ class NETWORKUTILITYMODULE_API UNetworkUtilities : public UBlueprintFunctionLibr
 public:
 
     //Get Player Local IP Adress
-    UFUNCTION(BlueprintPure, Category = "Network Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Wirless Operations|Wi-fi")
     static FString GetLocalIpAddress();
 
     //Is User Connected To Internet
-    UFUNCTION(BlueprintPure, Category = "Network Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Wirless Operations|Wi-fi")
     static bool IsConnectedToInternet();
 
     //Get Type Of Connection Type (Ethernet/Wifi)
-    UFUNCTION(BlueprintPure, Category = "Network Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Wirless Operations|Wi-fi")
     static FString GetConnectionType();
 
     //Get the wifi Network Name
-    UFUNCTION(BlueprintPure, Category = "Network Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Wirless Operations|Wi-fi")
     static FString GetWifiNetworkName();
 
     //Get The Active Network Card Name
-    UFUNCTION(BlueprintPure, Category = "Network Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Wirless Operations|Wi-fi")
     static FString GetActiveNetworkCard();
 };

@@ -7,95 +7,89 @@
 #include "BatteryUtility.h"
 
 #if PLATFORM_WINDOWS
-
 #include "Windows/AllowWindowsPlatformTypes.h"
-#include "Windows/WindowsHWrapper.h"
+#include <windows.h> 
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
 
-// Log category for battery utility
-DEFINE_LOG_CATEGORY_STATIC(LogBatteryUtility, Log, All);
 
-// Battery flag constants
-namespace BatteryFlags
+static bool GetWindowsPowerStatus(SYSTEM_POWER_STATUS& OutStatus)
 {
-    const BYTE NoBattery = 128;
-    const BYTE FullyCharged = 8;
-}
+#if PLATFORM_WINDOWS
+    FMemory::Memzero(OutStatus);
 
-// Helper to get battery status
-static bool GetBatteryStatus(SYSTEM_POWER_STATUS& OutStatus)
-{
     if (GetSystemPowerStatus(&OutStatus))
     {
         return true;
     }
-    UE_LOG(LogBatteryUtility, Warning, TEXT("Failed to get system power status"));
+#endif
     return false;
 }
-
-#include "Windows/HideWindowsPlatformTypes.h"
-
-#endif
 
 bool UBatteryUtility::HasBattery()
 {
 #if PLATFORM_WINDOWS
     SYSTEM_POWER_STATUS Status;
-    if (GetBatteryStatus(Status))
+    if (GetWindowsPowerStatus(Status))
     {
-        return (Status.BatteryFlag & BatteryFlags::NoBattery) == 0;
+
+        if (Status.BatteryFlag & BATTERY_FLAG_NO_BATTERY)
+        {
+            return false;
+        }
+
+        if (Status.BatteryFlag == 255)
+        {
+            return false;
+        }
+
+        return true;
     }
-    return false;
-#else
-    UE_LOG(LogBatteryUtility, Warning, TEXT("HasBattery not supported on this platform"));
-    return false;
 #endif
+    return false;
 }
 
 int32 UBatteryUtility::GetBatteryLevel()
 {
 #if PLATFORM_WINDOWS
     SYSTEM_POWER_STATUS Status;
-    if (!GetBatteryStatus(Status) || (Status.BatteryFlag & BatteryFlags::NoBattery))
+    if (GetWindowsPowerStatus(Status))
     {
-        return -1;
-    }
 
-    // Return 100 if fully charged, otherwise use reported percentage
-    return (Status.BatteryFlag & BatteryFlags::FullyCharged) ? 100 : Status.BatteryLifePercent;
-#else
-    UE_LOG(LogBatteryUtility, Warning, TEXT("GetBatteryLevel not supported on this platform"));
-    return -1;
+        if (Status.BatteryLifePercent == 255)
+        {
+            return 0; 
+        }
+
+        return FMath::Clamp((int32)Status.BatteryLifePercent, 0, 100);
+    }
 #endif
+    return 0;
 }
 
 bool UBatteryUtility::IsCharging()
 {
 #if PLATFORM_WINDOWS
     SYSTEM_POWER_STATUS Status;
-    if (!GetBatteryStatus(Status) || (Status.BatteryFlag & BatteryFlags::NoBattery))
+    if (GetWindowsPowerStatus(Status))
     {
-        return false;
+        return (Status.BatteryFlag & BATTERY_FLAG_CHARGING) != 0;
     }
-
-    return Status.ACLineStatus == 1 && !(Status.BatteryFlag & BatteryFlags::FullyCharged);
-#else
-    UE_LOG(LogBatteryUtility, Warning, TEXT("IsCharging not supported on this platform"));
-    return false;
 #endif
+    return false;
 }
 
 bool UBatteryUtility::IsFullyCharged()
 {
 #if PLATFORM_WINDOWS
     SYSTEM_POWER_STATUS Status;
-    if (!GetBatteryStatus(Status) || (Status.BatteryFlag & BatteryFlags::NoBattery))
+    if (GetWindowsPowerStatus(Status))
     {
-        return false;
-    }
+        bool bIsPluggedIn = (Status.ACLineStatus == 1);
+        bool bIsAtMax = (Status.BatteryLifePercent == 100);
 
-    return (Status.BatteryFlag & BatteryFlags::FullyCharged) != 0;
-#else
-    UE_LOG(LogBatteryUtility, Warning, TEXT("IsFullyCharged not supported on this platform"));
-    return false;
+        return bIsPluggedIn && bIsAtMax;
+    }
 #endif
+    return false;
 }

@@ -5,104 +5,151 @@
 // ---------------------------------------------------
 
 #include "MessageBoxWindows.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h" 
+// -----------------
+
+#if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
-#include "Windows/WindowsHWrapper.h"  
+#include <Windows.h>
 #include <CommCtrl.h>
 #include "Windows/HideWindowsPlatformTypes.h"
+#endif
 
-
-FMessageBoxResult UMessageBoxWindows::ShowMessageBox(
+void UNativeMessageBox::ShowNativeMessageBox(
     const FString& Title,
-    const FString& Content,
-    EMessageBoxIcon IconType,
-    bool bShowSecondButton,
-    const FString& FirstButtonText,
-    const FString& SecondButtonText)
+    const FString& Message,
+    EMessageBoxButtons Buttons,
+    EWNTMessageBoxIcon Icon,
+    EMessageBoxResult& Result)
 {
-    FMessageBoxResult Result;
 
-    // Convert FString to wide strings directly
-    const TCHAR* WideTitle = *Title;
-    const TCHAR* WideContent = *Content;
-    const TCHAR* WideFirstButton = *FirstButtonText;
-    const TCHAR* WideSecondButton = *SecondButtonText;
+    Result = EMessageBoxResult::Canceled;
 
-    // Set up task dialog configuration
-    TASKDIALOGCONFIG config = { 0 };
-    config.cbSize = sizeof(config);
-    config.hwndParent = nullptr;
-    config.dwFlags = TDF_POSITION_RELATIVE_TO_WINDOW;
-
-    // Set title and content
-    config.pszWindowTitle = WideTitle;
-    config.pszMainInstruction = WideContent;
-
-    // Set icon based on IconType
-    switch (IconType)
+#if PLATFORM_WINDOWS
+    HWND ParentWindow = NULL;
+    if (GEngine && GEngine->GameViewport)
     {
-    case EMessageBoxIcon::Information:
-        config.pszMainIcon = TD_INFORMATION_ICON;
-        break;
-    case EMessageBoxIcon::Warning:
-        config.pszMainIcon = TD_WARNING_ICON;
-        break;
-    case EMessageBoxIcon::Error:
-        config.pszMainIcon = TD_ERROR_ICON;
-        break;
-    case EMessageBoxIcon::Question:
-        config.pszMainIcon = nullptr;  // No specific question icon, using null
-        break;
-    case EMessageBoxIcon::None:
-    default:
-        config.pszMainIcon = nullptr;
-        break;
+        ParentWindow = (HWND)GEngine->GameViewport->GetWindow()->GetNativeWindow()->GetOSWindowHandle();
     }
 
-    // Configure buttons
-    TASKDIALOG_BUTTON buttons[2];
-    int buttonCount = bShowSecondButton ? 2 : 1;
+    UINT uType = 0;
+    switch (Buttons)
+    {
+    case EMessageBoxButtons::Ok:          uType |= MB_OK; break;
+    case EMessageBoxButtons::OkCancel:    uType |= MB_OKCANCEL; break;
+    case EMessageBoxButtons::YesNo:       uType |= MB_YESNO; break;
+    case EMessageBoxButtons::YesNoCancel: uType |= MB_YESNOCANCEL; break;
+    }
 
-    buttons[0].nButtonID = 100;  // Custom ID for first button
-    buttons[0].pszButtonText = WideFirstButton;
+
+    switch (Icon)
+    {
+    case EWNTMessageBoxIcon::Error:       uType |= MB_ICONSTOP; break;
+    case EWNTMessageBoxIcon::Warning:     uType |= MB_ICONWARNING; break;
+    case EWNTMessageBoxIcon::Information: uType |= MB_ICONINFORMATION; break;
+    case EWNTMessageBoxIcon::Question:    uType |= MB_ICONQUESTION; break;
+    case EWNTMessageBoxIcon::None:        break;
+    }
+
+    int32 WinResult = MessageBoxW(ParentWindow, *Message, *Title, uType);
+
+    switch (WinResult)
+    {
+    case IDOK:
+    case IDYES:
+        Result = EMessageBoxResult::Confirmed;
+        break;
+
+    case IDNO:
+        Result = EMessageBoxResult::Declined;
+        break;
+
+    case IDCANCEL:
+    default:
+        Result = EMessageBoxResult::Canceled;
+        break;
+    }
+#else
+    UE_LOG(LogTemp, Warning, TEXT("ShowNativeMessageBox: Not supported on this platform"));
+    Result = EMessageBoxResult::Canceled;
+#endif
+}
+
+void UNativeMessageBox::ShowMessageBox(
+    const FString& Title,
+    const FString& Message,
+    EWNTMessageBoxIcon Icon,
+    const FString& FirstButtonText,
+    const FString& SecondButtonText,
+    bool bShowSecondButton,
+    ECustomDialogResult& Result)
+{
+
+    Result = ECustomDialogResult::SecondButton;
+
+#if PLATFORM_WINDOWS
+    HWND ParentWindow = NULL;
+    if (GEngine && GEngine->GameViewport)
+    {
+        ParentWindow = (HWND)GEngine->GameViewport->GetWindow()->GetNativeWindow()->GetOSWindowHandle();
+    }
+
+    TASKDIALOGCONFIG Config = { 0 };
+    Config.cbSize = sizeof(Config);
+    Config.hwndParent = ParentWindow;
+    Config.dwFlags = TDF_POSITION_RELATIVE_TO_WINDOW | TDF_ALLOW_DIALOG_CANCELLATION;
+
+    Config.pszWindowTitle = *Title;   
+    Config.pszMainInstruction = *Message;
+
+    switch (Icon)
+    {
+    case EWNTMessageBoxIcon::Information: Config.pszMainIcon = TD_INFORMATION_ICON; break;
+    case EWNTMessageBoxIcon::Warning:     Config.pszMainIcon = TD_WARNING_ICON; break;
+    case EWNTMessageBoxIcon::Error:       Config.pszMainIcon = TD_ERROR_ICON; break;
+    case EWNTMessageBoxIcon::Question:    Config.pszMainIcon = TD_INFORMATION_ICON; break;
+    default:                           Config.pszMainIcon = nullptr; break;
+    }
+
+    TASKDIALOG_BUTTON Buttons[2];
+    int ButtonCount = 0;
+
+    Buttons[ButtonCount].nButtonID = 101;
+    Buttons[ButtonCount].pszButtonText = *FirstButtonText;
+    ButtonCount++;
+
 
     if (bShowSecondButton)
     {
-        buttons[1].nButtonID = 101;  // Custom ID for second button
-        buttons[1].pszButtonText = WideSecondButton;
+        Buttons[ButtonCount].nButtonID = 102;
+        Buttons[ButtonCount].pszButtonText = *SecondButtonText;
+        ButtonCount++;
     }
 
-    config.pButtons = buttons;
-    config.cButtons = buttonCount;
+    Config.pButtons = Buttons;
+    Config.cButtons = ButtonCount;
 
-    // Show the dialog
-    int nButtonPressed = 0;
-    HRESULT hr = TaskDialogIndirect(&config, &nButtonPressed, nullptr, nullptr);
+    int nPressedButtonID = 0;
+    HRESULT hr = TaskDialogIndirect(&Config, &nPressedButtonID, nullptr, nullptr);
 
-    // Process result
+
     if (SUCCEEDED(hr))
     {
-        switch (nButtonPressed)
+
+        if (nPressedButtonID == 101)
         {
-        case 100:  // First button pressed
-            Result.bFirstButtonPressed = true;
-            Result.bWasClosedWithoutSelection = false;
-            break;
-        case 101:  // Second button pressed
-            Result.bFirstButtonPressed = false;
-            Result.bWasClosedWithoutSelection = false;
-            break;
-        case 0:    // Dialog closed without selection (e.g., via close button)
-            Result.bFirstButtonPressed = false;
-            Result.bWasClosedWithoutSelection = true;
-            break;
+            Result = ECustomDialogResult::FirstButton;
+        }
+        else
+        {
+
+            Result = ECustomDialogResult::SecondButton;
         }
     }
-    else
-    {
-        // Handle failure to create dialog (e.g., invalid parameters or system error)
-        Result.bFirstButtonPressed = false;
-        Result.bWasClosedWithoutSelection = true;
-    }
-
-    return Result;
+#else
+    // Non-Windows Fallback
+    UE_LOG(LogTemp, Warning, TEXT("Native Custom MessageBox is Windows Only."));
+#endif
 }

@@ -4,126 +4,115 @@
 // Support:  https://ko-fi.com/aldertlake
 // ---------------------------------------------------
 
-#include "ToastNotificationLibrary.h"
-#include "Windows/AllowWindowsPlatformTypes.h"
-#include "Windows/WindowsHWrapper.h" 
-#include <ShellAPI.h>
-#include "Misc/ConfigCacheIni.h"
+#include "ToastNotificationLibrary.h" 
+#include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+
+
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <windows.h>
+#include <shellapi.h>
+#include <strsafe.h>
 #include "Windows/HideWindowsPlatformTypes.h"
-#include <string> // Added for std::wstring
 
-static NOTIFYICONDATAW TrayIconData = { 0 };
-static bool bIsTrayIconInitialized = false;
-bool UToastNotificationLibrary::bIsShutdownRegistered = false;
+static const UINT TRAY_ICON_ID = 5500;
+static bool bIsCleanupRegistered = false;
+#endif
 
-// Registers cleanup callback on application exit
-void UToastNotificationLibrary::StaticInitialize()
-{
-    if (!bIsShutdownRegistered)
-    {
-        FCoreDelegates::OnPreExit.AddLambda([]()
-            {
-                CleanupTrayIcon();
-            });
-        bIsShutdownRegistered = true;
-    }
-}
-
-// Manually cleans up resources (optional)
-void UToastNotificationLibrary::StaticShutdown()
-{
-    CleanupTrayIcon();
-    bIsShutdownRegistered = false;
-}
-
-// Retrieves the game title from the configuration or uses a fallback
-FString UToastNotificationLibrary::GetGameTitle()
-{
-    FString GameTitle;
-    GConfig->GetString(TEXT("/Script/EngineSettings.GeneralProjectSettings"), TEXT("ProjectName"), GameTitle, GGameIni);
-    return GameTitle.IsEmpty() ? TEXT("My Unreal Game") : GameTitle;
-}
-
-// Displays a tray notification with the specified title, message, and icon type
 void UToastNotificationLibrary::ShowToastNotification(const FString& Title, const FString& Message, EToastIconType IconType)
 {
-    StaticInitialize(); // Ensure cleanup is registered
-    DisplayTrayNotification(Title, Message, IconType);
-}
+#if PLATFORM_WINDOWS
 
-// Removes the tray icon from the system tray
-void UToastNotificationLibrary::CleanupTrayIcon()
-{
-    if (bIsTrayIconInitialized)
+    if (!GEngine || !GEngine->GameViewport) return;
+
+    TSharedPtr<SWindow> WindowPtr = GEngine->GameViewport->GetWindow();
+    if (!WindowPtr.IsValid()) return;
+
+    TSharedPtr<FGenericWindow> NativeWindow = WindowPtr->GetNativeWindow();
+    if (!NativeWindow.IsValid()) return;
+
+    HWND ParentWindow = (HWND)NativeWindow->GetOSWindowHandle();
+    if (!ParentWindow) return;
+
+    NOTIFYICONDATAW Nid = { 0 };
+    Nid.cbSize = sizeof(NOTIFYICONDATAW);
+    Nid.hWnd = ParentWindow;
+    Nid.uID = TRAY_ICON_ID;
+
+    Nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_INFO;
+    Nid.uCallbackMessage = WM_USER + 300; // Unique callback ID
+
+    // Load Game Icon
+    HICON GameIcon = (HICON)GetClassLongPtr(ParentWindow, GCLP_HICON);
+    Nid.hIcon = GameIcon ? GameIcon : LoadIcon(NULL, IDI_APPLICATION);
+
+    const TCHAR* ProjName = FApp::GetProjectName();
+    if (ProjName)
     {
-        Shell_NotifyIconW(NIM_DELETE, &TrayIconData);
-        bIsTrayIconInitialized = false;
-        ZeroMemory(&TrayIconData, sizeof(NOTIFYICONDATAW)); // Clear structure to prevent stale data
+        StringCchCopyW(Nid.szTip, ARRAYSIZE(Nid.szTip), (LPCWSTR)ProjName);
     }
-}
-
-// Internal implementation of tray notification display
-void UToastNotificationLibrary::DisplayTrayNotification(const FString& Title, const FString& Message, EToastIconType IconType)
-{
-    // Clean up any existing tray icon to avoid conflicts
-    if (bIsTrayIconInitialized)
+    else
     {
-        Shell_NotifyIconW(NIM_DELETE, &TrayIconData);
-        bIsTrayIconInitialized = false;
-        ZeroMemory(&TrayIconData, sizeof(NOTIFYICONDATAW));
-    }
-
-    // Get the active window handle
-    HWND hWnd = GetActiveWindow();
-    if (!hWnd)
-    {
-        return; // Silently fail if no window is available
-    }
-
-    // Get the game title for the tooltip
-    FString GameTitle = GetGameTitle();
-    std::wstring GameTitleW(GameTitle.GetCharArray().GetData());
-
-    // Initialize tray icon data
-    TrayIconData.cbSize = sizeof(NOTIFYICONDATAW);
-    TrayIconData.hWnd = hWnd;
-    TrayIconData.uID = 1; // Unique ID for the tray icon
-    TrayIconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_INFO;
-    TrayIconData.uCallbackMessage = WM_USER + 1; // Custom message ID
-    TrayIconData.hIcon = LoadIcon(NULL, IDI_APPLICATION); // Default application icon
-    TrayIconData.uTimeout = 5000; // 5-second timeout
-
-    // Set tooltip (limited to 128 characters)
-    wcsncpy_s(TrayIconData.szTip, 128, GameTitleW.c_str(), _TRUNCATE);
-
-    // Add the tray icon
-    if (!Shell_NotifyIconW(NIM_ADD, &TrayIconData))
-    {
-        return; // Silently fail if tray icon creation fails
+        StringCchCopyW(Nid.szTip, ARRAYSIZE(Nid.szTip), L"Unreal Game");
     }
 
-    bIsTrayIconInitialized = true;
+    StringCchCopyW(Nid.szInfoTitle, ARRAYSIZE(Nid.szInfoTitle), (LPCWSTR)*Title);
+    StringCchCopyW(Nid.szInfo, ARRAYSIZE(Nid.szInfo), (LPCWSTR)*Message);
 
-    // Set the balloon icon based on IconType
+    // Set Icon Type
     switch (IconType)
     {
-    case EToastIconType::Warning:
-        TrayIconData.dwInfoFlags = NIIF_WARNING; // Exclamation mark
-        break;
-    case EToastIconType::Error:
-        TrayIconData.dwInfoFlags = NIIF_ERROR;   // Error (red X)
-        break;
-    case EToastIconType::Info:
-    default:
-        TrayIconData.dwInfoFlags = NIIF_INFO;    // Info (blue "i")
-        break;
+    case EToastIconType::Info:    Nid.dwInfoFlags = NIIF_INFO; break;
+    case EToastIconType::Warning: Nid.dwInfoFlags = NIIF_WARNING; break;
+    case EToastIconType::Error:   Nid.dwInfoFlags = NIIF_ERROR; break;
+    default:                      Nid.dwInfoFlags = NIIF_NONE; break;
     }
 
-    // Set title and message (with length limits)
-    wcsncpy_s(TrayIconData.szInfoTitle, 64, *Title, _TRUNCATE); // Title limited to 64 chars
-    wcsncpy_s(TrayIconData.szInfo, 256, *Message, _TRUNCATE);   // Message limited to 256 chars
+    BOOL bSuccess = Shell_NotifyIconW(NIM_MODIFY, &Nid);
 
-    // Show the notification
-    Shell_NotifyIconW(NIM_MODIFY, &TrayIconData);
+    if (!bSuccess)
+    {
+        // Icon missing, add it fresh
+        bSuccess = Shell_NotifyIconW(NIM_ADD, &Nid);
+
+        if (bSuccess)
+        {
+            // Enable modern behavior (Version 4)
+            Nid.uVersion = NOTIFYICON_VERSION_4;
+            Shell_NotifyIconW(NIM_SETVERSION, &Nid);
+
+            // Register cleanup
+            if (!bIsCleanupRegistered)
+            {
+                FCoreDelegates::OnPreExit.AddStatic(&UToastNotificationLibrary::CleanupTrayIcon);
+                bIsCleanupRegistered = true;
+            }
+        }
+    }
+#endif
+}
+
+void UToastNotificationLibrary::CleanupTrayIcon()
+{
+#if PLATFORM_WINDOWS
+    NOTIFYICONDATAW Nid = { 0 };
+    Nid.cbSize = sizeof(NOTIFYICONDATAW);
+
+    // Try to get window handle safely
+    if (GEngine && GEngine->GameViewport)
+    {
+        TSharedPtr<SWindow> Win = GEngine->GameViewport->GetWindow();
+        if (Win.IsValid() && Win->GetNativeWindow().IsValid())
+        {
+            Nid.hWnd = (HWND)Win->GetNativeWindow()->GetOSWindowHandle();
+        }
+    }
+
+    Nid.uID = TRAY_ICON_ID;
+    Shell_NotifyIconW(NIM_DELETE, &Nid);
+#endif
 }

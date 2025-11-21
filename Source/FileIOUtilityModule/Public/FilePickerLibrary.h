@@ -24,20 +24,23 @@ class FILEIOUTILITYMODULE_API UFilePickerLibrary : public UBlueprintFunctionLibr
 
 public:
 
-    //Open File Folder Picker 
-    UFUNCTION(BlueprintCallable, Category = "File Operations System")
+    //This function will open a file picker on windows, you can custom every option & spect of the file picker.
+    //Note that you may need to reffear to the docs to understand how to use the FileTypes specifiar (unsupported in folders).
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management")
     static bool OpenFileFolderPicker(
+        const FString& DialogTitle,
+        const FString& DefaultPath,
+        const FString& FileTypes,
+        bool bAllowMultiple,
         EFilePickerType PickerType,
-        bool bAllFilesTypeSupported,
-        const FString& AllowedFileExtensions,
-        FString& OutSelectedPath
+        TArray<FString>& OutFilenames
     );
 
     //Output Keyboard Layout Used By Use System (Check Documentation For More Info)
-    UFUNCTION(BlueprintPure, Category = "System Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
     static FString GetCurrentKeyboardLayout();
 
     //Ouput The system Language 
-    UFUNCTION(BlueprintPure, Category = "System Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
     static FString GetSystemLanguage();
 };

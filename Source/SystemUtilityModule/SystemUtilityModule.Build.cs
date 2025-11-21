@@ -30,7 +30,7 @@ public class SystemUtilityModule : ModuleRules
                 "Advapi32.lib",   // WindowsInfoBPLibrary
                 "Winmm.lib",      // Audio fallbacks
                 "XInput.lib",     // May be used in message-based user notifications
-                "dxgi.lib"        // GPU info (part of WindowsInfoBPLibrary)
+                "dxgi.lib",      // GPU info (part of WindowsInfoBPLibrary)
             });
         }
     }

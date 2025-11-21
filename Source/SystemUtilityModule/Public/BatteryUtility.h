@@ -18,18 +18,18 @@ class SYSTEMUTILITYMODULE_API UBatteryUtility : public UBlueprintFunctionLibrary
 public:
 
     //Verify If User Has A Battery
-    UFUNCTION(BlueprintPure, Category = "Hardware Info", meta = (DisplayName = "Has Battery"))
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Has Battery"))
     static bool HasBattery();
 
     //Get Battery Level Of User's Laptop
-    UFUNCTION(BlueprintPure, Category = "Hardware Info", meta = (DisplayName = "Get Battery Level"))
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Get Battery Level"))
     static int32 GetBatteryLevel();
 
     //Verify If User Laptop is in charge mode
-    UFUNCTION(BlueprintPure, Category = "Hardware Info", meta = (DisplayName = "Is Battery Charging"))
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Is Battery Charging"))
     static bool IsCharging();
 
     //Verify If User Laptop Is Fully Charged
-    UFUNCTION(BlueprintPure, Category = "Hardware Info", meta = (DisplayName = "Is Battery Fully Charged"))
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Is Battery Fully Charged"))
     static bool IsFullyCharged();
 };

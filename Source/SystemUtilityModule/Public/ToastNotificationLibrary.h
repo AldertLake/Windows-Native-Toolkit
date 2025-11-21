@@ -13,9 +13,10 @@
 UENUM(BlueprintType)
 enum class EToastIconType : uint8
 {
-    Info        UMETA(DisplayName = "Info"),
-    Warning     UMETA(DisplayName = "Exclamation"),
-    Error       UMETA(DisplayName = "Error")
+    Info        UMETA(DisplayName = "Information"),
+    Warning     UMETA(DisplayName = "Warning"),
+    Error       UMETA(DisplayName = "Error"),
+    None        UMETA(DisplayName = "No Icon")
 };
 
 UCLASS()
@@ -25,25 +26,14 @@ class SYSTEMUTILITYMODULE_API UToastNotificationLibrary : public UBlueprintFunct
 
 public:
 
-    //Toast notification with custom title and content
-    UFUNCTION(BlueprintCallable, Category = "Toast Notification")
-    static void ShowToastNotification(const FString& Title, const FString& Message, EToastIconType IconType = EToastIconType::Info);
+    //This function will push notification with custom title & descreption & icon.
+    //Note that the process name & icon of this notification follow the packaged game settings.
+    //This can crash your editor if you abuse it alot in editor but 100% Safe in packaged game.
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|Notifications", meta = (DisplayName = "Push System Notification"))
+    static void ShowToastNotification(const FString& Title, const FString& Message, EToastIconType IconType);
 
-    //This should be called each time the show notification node ended
-    UFUNCTION(BlueprintCallable, Category = "Toast Notification")
+    //This function is used to clear the tray icon created by ShowToastNotification.
+    //Note : This function is old & you should not use it. starting from 2.2 the tray management is automated !
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|Notifications", meta = (DeprecatedFunction, DeprecationMessage = "Tray is managed automaticaly & this function is Deprecated !"))
     static void CleanupTrayIcon();
-
-private:
-    // Internal helper to initialize and show the tray notification
-    static void DisplayTrayNotification(const FString& Title, const FString& Message, EToastIconType IconType);
-
-    // Helper to get the game title from configuration
-    static FString GetGameTitle();
-
-    // Static initialization and cleanup for the library
-    static void StaticInitialize();
-    static void StaticShutdown();
-
-    // Tracks whether shutdown callback is registered
-    static bool bIsShutdownRegistered;
 };

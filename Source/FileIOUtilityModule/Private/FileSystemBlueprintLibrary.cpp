@@ -6,228 +6,328 @@
 
 #include "FileSystemBlueprintLibrary.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
+#include "GenericPlatform/GenericPlatformFile.h"
 #include "Misc/Paths.h"
 
-// Helper to validate and normalize paths
-static bool ValidatePath(const FString& Path, bool bIsDirectory, FString& OutNormalizedPath, FString& OutErrorMessage)
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <fileapi.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
+
+
+static IPlatformFile& GetPlatformFile()
 {
-    if (Path.IsEmpty())
+    return FPlatformFileManager::Get().GetPlatformFile();
+}
+
+static FString FixPath(const FString& Path)
+{
+    FString Fixed = FPaths::ConvertRelativePathToFull(Path);
+    FPaths::NormalizeFilename(Fixed);
+    if (Fixed.Len() > 3 && Fixed.EndsWith(TEXT("/")))
     {
-        OutErrorMessage = TEXT("Path is empty.");
+        Fixed.LeftChopInline(1);
+    }
+    return Fixed;
+}
+
+bool UFileSystemBlueprintLibrary::MoveFileToFolder(const FString& Source, const FString& Destination, bool bOverwrite, FString& OutError)
+{
+    IPlatformFile& PlatformFile = GetPlatformFile();
+
+    FString CleanSource = FixPath(Source);
+    FString CleanDestFolder = FixPath(Destination);
+
+    // 1. Check Source
+    if (!PlatformFile.FileExists(*CleanSource))
+    {
+        OutError = FString::Printf(TEXT("Source file does not exist: %s"), *CleanSource);
         return false;
     }
 
-    OutNormalizedPath = FPaths::ConvertRelativePathToFull(Path);
-    FPaths::NormalizeFilename(OutNormalizedPath);
+    FString FileName = FPaths::GetCleanFilename(CleanSource);
+    FString FullDestPath = FPaths::Combine(CleanDestFolder, FileName);
+    FPaths::NormalizeFilename(FullDestPath);
 
-    if (bIsDirectory && !FPaths::DirectoryExists(OutNormalizedPath))
+
+    if (PlatformFile.FileExists(*FullDestPath))
     {
-        OutErrorMessage = FString::Printf(TEXT("Directory does not exist: %s"), *OutNormalizedPath);
-        return false;
+        if (bOverwrite)
+        {
+
+            if (!PlatformFile.DeleteFile(*FullDestPath))
+            {
+                PlatformFile.SetReadOnly(*FullDestPath, false);
+                if (!PlatformFile.DeleteFile(*FullDestPath))
+                {
+                    OutError = TEXT("Failed to overwrite existing file (Locked or Permission Denied).");
+                    return false;
+                }
+            }
+        }
+        else
+        {
+            OutError = TEXT("Destination file already exists.");
+            return false;
+        }
     }
-    else if (!bIsDirectory && !FPaths::FileExists(OutNormalizedPath))
+
+
+    if (!PlatformFile.DirectoryExists(*CleanDestFolder))
     {
-        OutErrorMessage = FString::Printf(TEXT("File does not exist: %s"), *OutNormalizedPath);
+        if (!PlatformFile.CreateDirectoryTree(*CleanDestFolder))
+        {
+            OutError = TEXT("Failed to create destination directory.");
+            return false;
+        }
+    }
+
+    // 5. Perform Move
+    if (!PlatformFile.MoveFile(*FullDestPath, *CleanSource))
+    {
+        if (PlatformFile.CopyFile(*FullDestPath, *CleanSource))
+        {
+            PlatformFile.DeleteFile(*CleanSource);
+            return true;
+        }
+
+        OutError = FString::Printf(TEXT("OS Error moving file to: %s"), *FullDestPath);
         return false;
     }
 
     return true;
 }
 
-bool UFileSystemBlueprintLibrary::MoveFileToFolder(
-    const FString& SourceFilePath,
-    const FString& DestinationFolderPath,
-    bool& bSuccess,
-    FString& OutErrorMessage)
+bool UFileSystemBlueprintLibrary::MoveFolderToFolder(const FString& Source, const FString& Destination, bool bOverwrite, FString& OutError)
 {
-    bSuccess = false;
-    OutErrorMessage.Empty();
+    IPlatformFile& PlatformFile = GetPlatformFile();
 
-    FString NormalizedSource, NormalizedDestFolder;
-    if (!ValidatePath(SourceFilePath, false, NormalizedSource, OutErrorMessage) ||
-        !ValidatePath(DestinationFolderPath, true, NormalizedDestFolder, OutErrorMessage))
+    FString CleanSource = FixPath(Source);
+    FString CleanDestParent = FixPath(Destination); 
+
+    if (!PlatformFile.DirectoryExists(*CleanSource))
     {
+        OutError = TEXT("Source directory does not exist.");
         return false;
     }
 
-    // Create destination folder if it doesn't exist
-    if (!FPaths::DirectoryExists(NormalizedDestFolder))
+
+    FString FolderName = FPaths::GetCleanFilename(CleanSource);
+    FString FullDestPath = FPaths::Combine(CleanDestParent, FolderName);
+    FPaths::NormalizeFilename(FullDestPath);
+
+
+    if (FullDestPath.StartsWith(CleanSource))
     {
-        if (!IFileManager::Get().MakeDirectory(*NormalizedDestFolder, true))
+        OutError = TEXT("Cannot move a folder into itself.");
+        return false;
+    }
+
+
+    if (PlatformFile.DirectoryExists(*FullDestPath))
+    {
+        if (!bOverwrite)
         {
-            OutErrorMessage = FString::Printf(TEXT("Failed to create directory: %s"), *NormalizedDestFolder);
+            OutError = FString::Printf(TEXT("Target folder already exists: %s"), *FullDestPath);
             return false;
         }
     }
 
-    FString FileName = FPaths::GetCleanFilename(NormalizedSource);
-    FString DestinationPath = FPaths::Combine(NormalizedDestFolder, FileName);
-
-    bSuccess = IFileManager::Get().Move(*DestinationPath, *NormalizedSource, true, true);
-    if (!bSuccess)
+    if (!PlatformFile.DirectoryExists(*CleanDestParent))
     {
-        OutErrorMessage = FString::Printf(TEXT("Failed to move file from %s to %s"), *NormalizedSource, *DestinationPath);
+        PlatformFile.CreateDirectoryTree(*CleanDestParent);
     }
 
-    return bSuccess;
-}
-
-bool UFileSystemBlueprintLibrary::DeleteFileW(
-    const FString& FilePath,
-    bool& bSuccess,
-    FString& OutErrorMessage)
-{
-    bSuccess = false;
-    OutErrorMessage.Empty();
-
-    FString NormalizedPath;
-    if (!ValidatePath(FilePath, false, NormalizedPath, OutErrorMessage))
+    if (PlatformFile.MoveFile(*FullDestPath, *CleanSource))
     {
-        return false;
+        return true;
     }
 
-    bSuccess = IFileManager::Get().Delete(*NormalizedPath, false, true, true);
-    if (!bSuccess)
+    if (PlatformFile.CopyDirectoryTree(*FullDestPath, *CleanSource, true))
     {
-        OutErrorMessage = FString::Printf(TEXT("Failed to delete file: %s"), *NormalizedPath);
-    }
-
-    return bSuccess;
-}
-
-bool UFileSystemBlueprintLibrary::GetFileInfo(
-    const FString& FilePath,
-    FFileInfo& OutFileInfo,
-    bool& bSuccess,
-    FString& OutErrorMessage)
-{
-    bSuccess = false;
-    OutErrorMessage.Empty();
-    OutFileInfo = FFileInfo();
-
-    FString NormalizedPath;
-    if (!ValidatePath(FilePath, false, NormalizedPath, OutErrorMessage))
-    {
-        return false;
-    }
-
-    FFileStatData FileStat = IFileManager::Get().GetStatData(*NormalizedPath);
-    if (FileStat.bIsValid)
-    {
-        OutFileInfo.FileSize = FileStat.FileSize;
-        OutFileInfo.CreationTime = FileStat.CreationTime;
-        bSuccess = true;
-    }
-    else
-    {
-        OutErrorMessage = FString::Printf(TEXT("Failed to get file info: %s"), *NormalizedPath);
-    }
-
-    return bSuccess;
-}
-
-bool UFileSystemBlueprintLibrary::MoveFolderToFolder(
-    const FString& SourceFolderPath,
-    const FString& DestinationFolderPath,
-    bool& bSuccess,
-    FString& OutErrorMessage)
-{
-    bSuccess = false;
-    OutErrorMessage.Empty();
-
-    FString NormalizedSource, NormalizedDestFolder;
-    if (!ValidatePath(SourceFolderPath, true, NormalizedSource, OutErrorMessage) ||
-        !ValidatePath(DestinationFolderPath, true, NormalizedDestFolder, OutErrorMessage))
-    {
-        return false;
-    }
-
-    // Create destination folder if it doesn't exist
-    if (!FPaths::DirectoryExists(NormalizedDestFolder))
-    {
-        if (!IFileManager::Get().MakeDirectory(*NormalizedDestFolder, true))
+        if (PlatformFile.DeleteDirectoryRecursively(*CleanSource))
         {
-            OutErrorMessage = FString::Printf(TEXT("Failed to create directory: %s"), *NormalizedDestFolder);
-            return false;
+            return true;
         }
+        OutError = TEXT("Moved data successfully, but failed to delete source folder (Permissions?).");
+        return true; // Data is safe in new location
     }
 
-    FString FolderName = FPaths::GetBaseFilename(NormalizedSource);
-    FString DestinationPath = FPaths::Combine(NormalizedDestFolder, FolderName);
-
-    bSuccess = IFileManager::Get().Move(*DestinationPath, *NormalizedSource, true, true);
-    if (!bSuccess)
-    {
-        OutErrorMessage = FString::Printf(TEXT("Failed to move folder from %s to %s"), *NormalizedSource, *DestinationPath);
-    }
-
-    return bSuccess;
+    OutError = TEXT("Failed to move folder. (Check permissions or open files).");
+    return false;
 }
 
-bool UFileSystemBlueprintLibrary::DeleteFolder(
-    const FString& FolderPath,
-    bool& bSuccess,
-    FString& OutErrorMessage)
+bool UFileSystemBlueprintLibrary::DeleteFileW(const FString& Path, FString& OutError)
 {
-    bSuccess = false;
-    OutErrorMessage.Empty();
+    IPlatformFile& PlatformFile = GetPlatformFile();
+    FString Target = FixPath(Path);
 
-    FString NormalizedPath;
-    if (!ValidatePath(FolderPath, true, NormalizedPath, OutErrorMessage))
+    if (!PlatformFile.FileExists(*Target))
     {
+        OutError = TEXT("File does not exist.");
         return false;
     }
 
-    bSuccess = IFileManager::Get().DeleteDirectory(*NormalizedPath, false, true);
-    if (!bSuccess)
-    {
-        OutErrorMessage = FString::Printf(TEXT("Failed to delete folder: %s"), *NormalizedPath);
-    }
+    // Try standard delete
+    if (PlatformFile.DeleteFile(*Target)) return true;
 
-    return bSuccess;
+    // If failed, try clearing Read-Only flag
+    PlatformFile.SetReadOnly(*Target, false);
+
+    if (PlatformFile.DeleteFile(*Target)) return true;
+
+    OutError = TEXT("Failed to delete file (Access Denied).");
+    return false;
 }
 
-bool UFileSystemBlueprintLibrary::GetFolderInfo(
-    const FString& FolderPath,
-    FFileInfo& OutFolderInfo,
-    bool& bSuccess,
-    FString& OutErrorMessage)
+bool UFileSystemBlueprintLibrary::DeleteFolder(const FString& Path, FString& OutError)
 {
-    bSuccess = false;
-    OutErrorMessage.Empty();
-    OutFolderInfo = FFileInfo();
+    IPlatformFile& PlatformFile = GetPlatformFile();
+    FString Target = FixPath(Path);
 
-    FString NormalizedPath;
-    if (!ValidatePath(FolderPath, true, NormalizedPath, OutErrorMessage))
+    if (!PlatformFile.DirectoryExists(*Target))
     {
+        OutError = TEXT("Directory does not exist.");
         return false;
     }
 
-    FFileStatData FolderStat = IFileManager::Get().GetStatData(*NormalizedPath);
-    if (FolderStat.bIsValid)
+    if (PlatformFile.DeleteDirectoryRecursively(*Target))
     {
-        TArray<FString> FileNames;
-        IFileManager::Get().FindFilesRecursive(FileNames, *NormalizedPath, TEXT("*.*"), true, false);
+        return true;
+    }
 
-        int64 TotalSize = 0;
-        for (const FString& File : FileNames)
+    OutError = TEXT("Failed to delete directory (Files might be in use).");
+    return false;
+}
+
+FfsFileInfo UFileSystemBlueprintLibrary::GetFileInfo(const FString& Path)
+{
+    IPlatformFile& PlatformFile = GetPlatformFile();
+    FString Target = FixPath(Path);
+    FfsFileInfo Info;
+
+    FFileStatData StatData = PlatformFile.GetStatData(*Target);
+
+    if (StatData.bIsValid)
+    {
+        Info.bExists = true;
+        Info.bIsDirectory = StatData.bIsDirectory;
+        Info.bIsReadOnly = StatData.bIsReadOnly;
+        Info.FileSizeBytes = StatData.FileSize;
+        Info.CreationTime = StatData.CreationTime;
+        Info.AccessTime = StatData.AccessTime;
+
+        if (Info.bIsDirectory)
         {
-            FString FullFilePath = FPaths::Combine(NormalizedPath, File);
-            FFileStatData FileStat = IFileManager::Get().GetStatData(*FullFilePath);
-            if (FileStat.bIsValid)
+            struct FFolderSizeVisitor : public IPlatformFile::FDirectoryVisitor
             {
-                TotalSize += FileStat.FileSize;
-            }
+                int64 Size = 0;
+                virtual bool Visit(const TCHAR* FilenameOrDirectory, bool bIsDirectory) override
+                {
+                    if (!bIsDirectory)
+                    {
+                        Size += IPlatformFile::GetPlatformPhysical().FileSize(FilenameOrDirectory);
+                    }
+                    return true;
+                }
+            };
+
+            FFolderSizeVisitor Visitor;
+            PlatformFile.IterateDirectoryRecursively(*Target, Visitor);
+            Info.FileSizeBytes = Visitor.Size;
         }
-
-        OutFolderInfo.FileSize = TotalSize;
-        OutFolderInfo.CreationTime = FolderStat.CreationTime;
-        bSuccess = true;
     }
-    else
+
+    return Info;
+}
+
+TArray<FPartitionInfo> UFileSystemBlueprintLibrary::GetAllAvailablePartitions()
+{
+    TArray<FPartitionInfo> Partitions;
+
+#if PLATFORM_WINDOWS
+    TCHAR SysDir[MAX_PATH];
+    FString SystemDriveLetter;
+    if (GetWindowsDirectory(SysDir, MAX_PATH) > 0)
     {
-        OutErrorMessage = FString::Printf(TEXT("Failed to get folder info: %s"), *NormalizedPath);
+
+        SystemDriveLetter = FString(SysDir).Left(3);
     }
 
-    return bSuccess;
+    const int32 BufferSize = 512;
+    TCHAR Buffer[BufferSize];
+    DWORD Result = GetLogicalDriveStrings(BufferSize, Buffer);
+
+    if (Result > 0 && Result <= BufferSize)
+    {
+        TCHAR* CurrentDrive = Buffer;
+        while (*CurrentDrive)
+        {
+            FPartitionInfo Info;
+            Info.DriveLetter = FString(CurrentDrive);
+
+            UINT Type = GetDriveType(CurrentDrive);
+            switch (Type)
+            {
+            case DRIVE_REMOVABLE: Info.DriveType = EPartitionType::Removable; break;
+            case DRIVE_FIXED:     Info.DriveType = EPartitionType::Fixed;     break;
+            case DRIVE_REMOTE:    Info.DriveType = EPartitionType::Network;   break;
+            case DRIVE_CDROM:     Info.DriveType = EPartitionType::CDROM;     break;
+            case DRIVE_RAMDISK:   Info.DriveType = EPartitionType::RamDisk;   break;
+            case DRIVE_NO_ROOT_DIR: Info.DriveType = EPartitionType::NoRoot;  break;
+            default:              Info.DriveType = EPartitionType::Unknown;   break;
+            }
+
+            if (!SystemDriveLetter.IsEmpty() && Info.DriveLetter.StartsWith(SystemDriveLetter.Left(1)))
+            {
+                Info.bIsSystemPartition = true;
+            }
+
+            if (Type != DRIVE_NO_ROOT_DIR)
+            {
+                ULARGE_INTEGER FreeBytesAvailable, TotalNumberOfBytes, TotalNumberOfFreeBytes;
+
+                if (GetDiskFreeSpaceEx(CurrentDrive, &FreeBytesAvailable, &TotalNumberOfBytes, &TotalNumberOfFreeBytes))
+                {
+                    Info.TotalSizeBytes = (int64)TotalNumberOfBytes.QuadPart;
+                    Info.FreeSizeBytes = (int64)TotalNumberOfFreeBytes.QuadPart; 
+                    Info.UsedSizeBytes = Info.TotalSizeBytes - Info.FreeSizeBytes;
+                }
+
+                TCHAR VolumeName[MAX_PATH + 1] = { 0 };
+                TCHAR FileSystemName[MAX_PATH + 1] = { 0 };
+                DWORD SerialNumber, MaxComponentLen, FileSystemFlags;
+
+                UINT OldMode = SetErrorMode(SEM_FAILCRITICALERRORS);
+
+                if (GetVolumeInformation(
+                    CurrentDrive,
+                    VolumeName, ARRAYSIZE(VolumeName),
+                    &SerialNumber,
+                    &MaxComponentLen,
+                    &FileSystemFlags,
+                    FileSystemName, ARRAYSIZE(FileSystemName)))
+                {
+                    Info.VolumeLabel = FString(VolumeName);
+                    Info.FileSystem = FString(FileSystemName);
+                }
+                else
+                {
+                    Info.VolumeLabel = TEXT("Removable Disk"); 
+                    Info.FileSystem = TEXT("Unknown");
+                }
+
+                SetErrorMode(OldMode); // Restore error mode
+            }
+
+            Partitions.Add(Info);
+
+            CurrentDrive += FCString::Strlen(CurrentDrive) + 1;
+        }
+    }
+#endif
+
+    return Partitions;
 }

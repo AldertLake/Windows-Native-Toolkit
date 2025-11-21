@@ -17,23 +17,23 @@ class SYSTEMUTILITYMODULE_API UWindowsInfoBPLibrary : public UBlueprintFunctionL
 
 public:
     //Output windwos current version
-    UFUNCTION(BlueprintPure, Category = "Windows Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
     static FString GetWindowsVersion();
 
     //Get Windows Build
-    UFUNCTION(BlueprintPure, Category = "Windows Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
     static FString GetWindowsBuild();
 
     //Get widows edition name eg: Proffesionel, Home, LTSC..
-    UFUNCTION(BlueprintPure, Category = "Windows Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
     static FString GetWindowsEdition();
 
     //Get the PC Name eg DESKTOP-XXXXX
-    UFUNCTION(BlueprintPure, Category = "Windows Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
     static FString GetPCName();
 
     //Get local user name 
-    UFUNCTION(BlueprintPure, Category = "Windows Info")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
     static FString GetLocalUserName();
 
 private:

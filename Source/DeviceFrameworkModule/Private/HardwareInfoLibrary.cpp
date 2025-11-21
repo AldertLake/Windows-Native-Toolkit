@@ -17,6 +17,7 @@
 #include "Windows/WindowsSystemIncludes.h"
 #include <dxgi1_4.h>
 #include <Xinput.h>
+#include <shellapi.h> //for cmd things..
 #include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
@@ -415,5 +416,60 @@ void USystemInfoBPLibrary::RestartGameWithCommandLine(const FString& ExtraComman
 
     FPlatformProcess::CloseProc(ProcHandle);
     bIsRestarting = false;
+#endif
+}
+
+bool USystemInfoBPLibrary::ExecuteWindowsCMD(const FString& Command, bool bRunAsAdmin, bool bHidden)
+{
+    if (Command.IsEmpty()) return false;
+
+    const FString Params = FString::Printf(TEXT("/c \"%s\""), *Command);
+
+#if PLATFORM_WINDOWS
+    if (bRunAsAdmin)
+    {
+        SHELLEXECUTEINFO ShExecInfo = { 0 };
+        ShExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
+        ShExecInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
+        ShExecInfo.hwnd = NULL;
+        ShExecInfo.lpVerb = TEXT("runas");
+        ShExecInfo.lpFile = TEXT("cmd.exe");
+        ShExecInfo.lpParameters = *Params;
+        ShExecInfo.lpDirectory = NULL;
+        ShExecInfo.nShow = bHidden ? SW_HIDE : SW_SHOW;
+
+        return ShellExecuteEx(&ShExecInfo);
+    }
+    else
+    {
+        // --- FIX IS HERE ---
+        FProcHandle Handle = FPlatformProcess::CreateProc(
+            TEXT("cmd.exe"), // 1. URL
+            *Params,         // 2. Parms
+            true,            // 3. bLaunchDetached
+            bHidden,         // 4. bLaunchHidden
+            bHidden,         // 5. bLaunchReallyHidden
+            nullptr,         // 6. OutProcessID (Pointer is fine here)
+            0,               // 7. PriorityModifier (MUST BE INT, NOT NULLPTR)
+            nullptr,         // 8. OptionalWorkingDirectory
+            nullptr          // 9. PipeWriteChild
+            // 10. PipeReadChild (Optional, defaults to nullptr)
+        );
+
+        return Handle.IsValid();
+    }
+#else
+    return false;
+#endif
+}
+
+void USystemInfoBPLibrary::ForceKillGame()
+{
+#if PLATFORM_WINDOWS
+
+    HANDLE hProcess = GetCurrentProcess();
+    TerminateProcess(hProcess, 0);
+#else
+    FPlatformMisc::RequestExit(true);
 #endif
 }

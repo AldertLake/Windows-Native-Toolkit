@@ -92,16 +92,33 @@ public:
 
     //Will Restart Game - Don't ever let the ExtraCommandLine empty. just put -Restart if you have to extrancommandline.
     //Note : This will crash the editor so please run it only in packaged relase & not in any kind of editor run.
+    //I did not add an #if WITH_EDITOR just so your editor crash & you learn to read descreption.
+    //Do not use it in editor isnt that clear ?!!!!
+    //You know what i want to say...right?..Editor=No
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Relaunch The Game"))
     static void RestartGameWithCommandLine(const FString& ExtraCommandLine);
 
+    //This is used to execute a CMD command, you can even execute commands that require admin but
+    //Player must allow you to do so. trying to bypass the UAC will result in game flagged as virus.
+    //If UAC is set to never notify then bingo, you can play around & execute whatever you like without notifying user.
+    //In most cases the Hidden bool do nothing since in most windwos builds the window of CMD will be hidden by default.
+    //Do not harm players devices with bad commands, be civile don't be an asshole.
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Execute Windows Command"))
+    static bool ExecuteWindowsCMD(const FString& Command, bool bRunAsAdmin, bool bHidden);
 
+    //Like the size said this function will force kill your beatiful game (i always spell the last word wrong smh).
+    //NOTE : Do not use this in editor because it will crash the editor or at least force kill it. (FAFO).
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Force Kill Game Process"))
+    static void ForceKillGame();
 
 
     // --- Deprecated Function List
 
     //Retrieves GPU details: name, manufacturer, VRAM stats, and current game VRAM usage in megabytes (DeprecatedFunction)
     //Warning : Never use this function it is an DeprecatedFunction & you should insted use the modern ones.
+    //There is 0 reason to use this, it has bad accuracy & may lag your game, why using it when better options exist ? huh?
+    //Remove it then..
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DeprecatedFunction, DeprecationMessage = "This function was splited into 3 different Functions, never use it"))
     static void GetGPUInfo(FString& Name, FString& Manufacturer, int32& TotalVRAMMB, int32& UsedVRAMMB, int32& FreeVRAMMB);
+
 };

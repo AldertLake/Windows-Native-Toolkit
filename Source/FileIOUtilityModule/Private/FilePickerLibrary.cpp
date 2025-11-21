@@ -5,74 +5,141 @@
 // ---------------------------------------------------
 
 #include "FilePickerLibrary.h"
-#include "DesktopPlatformModule.h"
-#include "Misc/Paths.h"
 #include "Framework/Application/SlateApplication.h"
-
+#include "Engine/GameViewportClient.h"
+#include "Engine/Engine.h"
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
-#include "Windows/WindowsHWrapper.h"
+#include "Widgets/SWindow.h"
+#include <shobjidl.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
 bool UFilePickerLibrary::OpenFileFolderPicker(
+    const FString& DialogTitle,
+    const FString& DefaultPath,
+    const FString& FileTypes,
+    bool bAllowMultiple,
     EFilePickerType PickerType,
-    bool bAllFilesTypeSupported,
-    const FString& AllowedFileExtensions,
-    FString& OutSelectedPath)
+    TArray<FString>& OutFilenames)
 {
-    OutSelectedPath.Empty();
+    OutFilenames.Empty();
 
-    IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-    if (!DesktopPlatform)
+#if PLATFORM_WINDOWS
+
+    void* ParentWindowHandle = nullptr;
+    if (GEngine && GEngine->GameViewport)
+    {
+        ParentWindowHandle = GEngine->GameViewport->GetWindow()->GetNativeWindow()->GetOSWindowHandle();
+    }
+
+    IFileOpenDialog* FileDialog = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&FileDialog));
+
+    if (FAILED(hr))
     {
         return false;
     }
 
-    const void* ParentWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
-    FString ResultPath;
+    DWORD dwFlags;
+    if (SUCCEEDED(FileDialog->GetOptions(&dwFlags)))
+    {
+        dwFlags |= FOS_FORCEFILESYSTEM; 
+
+        // --- NEW: Folder Picking Logic ---
+        if (PickerType == EFilePickerType::Folder)
+        {
+            dwFlags |= FOS_PICKFOLDERS;
+        }
+
+        if (bAllowMultiple)
+        {
+            dwFlags |= FOS_ALLOWMULTISELECT;
+        }
+
+        FileDialog->SetOptions(dwFlags);
+    }
+
+    // 4. Set Title
+    FileDialog->SetTitle(*DialogTitle);
+
+    // 5. Set Default Folder
+    if (!DefaultPath.IsEmpty())
+    {
+        IShellItem* DefaultItem = nullptr;
+        if (SUCCEEDED(SHCreateItemFromParsingName(*DefaultPath, nullptr, IID_PPV_ARGS(&DefaultItem))))
+        {
+            FileDialog->SetFolder(DefaultItem);
+            DefaultItem->Release();
+        }
+    }
 
     if (PickerType == EFilePickerType::File)
     {
-        FString FileTypeFilter = bAllFilesTypeSupported ? TEXT("All Files (*.*)|*.*") : AllowedFileExtensions;
-        TArray<FString> OutFiles;
+        TArray<FString> RawFilters;
+        FileTypes.ParseIntoArray(RawFilters, TEXT("|"), true);
 
-        bool bSuccess = DesktopPlatform->OpenFileDialog(
-            ParentWindowHandle,
-            TEXT("Select a File"),
-            FPaths::ProjectDir(),
-            TEXT(""),
-            FileTypeFilter,
-            EFileDialogFlags::None,
-            OutFiles
-        );
+        TArray<COMDLG_FILTERSPEC> FileTypesCOM;
+        TArray<FString> TempNames;
+        TArray<FString> TempSpecs;
 
-        if (bSuccess && OutFiles.Num() > 0)
+        for (int32 i = 0; i < RawFilters.Num(); i += 2)
         {
-            ResultPath = OutFiles[0];
+            if (RawFilters.IsValidIndex(i + 1))
+            {
+                COMDLG_FILTERSPEC Spec;
+                TempNames.Add(RawFilters[i]);
+                TempSpecs.Add(RawFilters[i + 1]);
+
+                Spec.pszName = *TempNames.Last();
+                Spec.pszSpec = *TempSpecs.Last();
+
+                FileTypesCOM.Add(Spec);
+            }
         }
-        else
+
+        if (FileTypesCOM.Num() > 0)
         {
-            return false;
+            FileDialog->SetFileTypes(FileTypesCOM.Num(), FileTypesCOM.GetData());
         }
     }
-    else
+
+    hr = FileDialog->Show((HWND)ParentWindowHandle);
+
+    bool bSuccess = false;
+
+    if (SUCCEEDED(hr))
     {
-        bool bSuccess = DesktopPlatform->OpenDirectoryDialog(
-            ParentWindowHandle,
-            TEXT("Select a Folder"),
-            FPaths::ProjectDir(),
-            ResultPath
-        );
-
-        if (!bSuccess)
+        IShellItemArray* Results = nullptr;
+        if (SUCCEEDED(FileDialog->GetResults(&Results)))
         {
-            return false;
+            DWORD Count = 0;
+            Results->GetCount(&Count);
+
+            for (DWORD i = 0; i < Count; i++)
+            {
+                IShellItem* Item = nullptr;
+                if (SUCCEEDED(Results->GetItemAt(i, &Item)))
+                {
+                    PWSTR FilePath = nullptr;
+                    if (SUCCEEDED(Item->GetDisplayName(SIGDN_FILESYSPATH, &FilePath)))
+                    {
+                        OutFilenames.Add(FString(FilePath));
+                        CoTaskMemFree(FilePath);
+                    }
+                    Item->Release();
+                }
+            }
+            Results->Release();
+            bSuccess = (OutFilenames.Num() > 0);
         }
     }
 
-    OutSelectedPath = ResultPath;
-    return true;
+    FileDialog->Release();
+    return bSuccess;
+#else
+    return false;
+#endif
 }
 
 FString UFilePickerLibrary::GetCurrentKeyboardLayout()

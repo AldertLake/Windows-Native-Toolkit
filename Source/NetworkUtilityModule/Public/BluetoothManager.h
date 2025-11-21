@@ -17,15 +17,16 @@ class UBluetoothManager : public UBlueprintFunctionLibrary
 
 public:
 
-    UFUNCTION(BlueprintPure, Category = "Bluetooth Functions")
+    //Verify if bluetooth is enabled by user or still disabled.
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Wirless Operations|Bluetooth")
     static bool IsBluetoothEnabled();
 
     // Number of paired devices (returns 0 on failure)
-    UFUNCTION(BlueprintPure, Category = "Bluetooth Functions")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Wirless Operations|Bluetooth")
     static int32 GetPairedDeviceCount();
 
     // Get the paired device name by index. Returns empty FString on invalid index or error.
-    UFUNCTION(BlueprintPure, Category = "Bluetooth Functions")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Wirless Operations|Bluetooth")
     static FString GetPairedDeviceName(int32 DeviceIndex);
  
 };
