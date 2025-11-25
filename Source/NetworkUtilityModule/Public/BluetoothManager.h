@@ -11,7 +11,7 @@
 #include "BluetoothManager.generated.h"
 
 UCLASS()
-class UBluetoothManager : public UBlueprintFunctionLibrary
+class NETWORKUTILITYMODULE_API UBluetoothManager : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 

@@ -62,4 +62,17 @@ public:
     //Sets volume for a specific INPUT device using its ID.
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Audio Input Device Volume"))
     static void SetInputVolumeForDevice(const FString& DeviceID, float Volume);
+
+    //Get output audio devices volume by device ID (Speaker..)
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Output Device Volume"))
+    static float GetOutputDeviceVolume(const FString & DeviceID);
+
+    //Get input audio devices volume by device ID (Micro....)
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Input Device Volume"))
+    static float GetInputDeviceVolume(const FString& DeviceID);
+
+    //This function will output the highest sound value as float normalized from 0 to 1.
+    //Used to visualize the audio sound.
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Audio Device Peak Value"))
+    static float GetAudioDevicePeakValue(const FString& DeviceID);
 };

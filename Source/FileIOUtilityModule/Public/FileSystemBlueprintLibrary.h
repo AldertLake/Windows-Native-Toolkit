@@ -77,7 +77,7 @@ struct FfsFileInfo
 };
 
 UCLASS()
-class UFileSystemBlueprintLibrary : public UBlueprintFunctionLibrary
+class FILEIOUTILITYMODULE_API UFileSystemBlueprintLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 

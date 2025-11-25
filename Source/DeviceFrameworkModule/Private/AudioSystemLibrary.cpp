@@ -252,3 +252,75 @@ void UAudioSystemLibrary::SetInputVolumeForDevice(const FString& DeviceID, float
     }
 #endif
 }
+
+float UAudioSystemLibrary::GetOutputDeviceVolume(const FString& DeviceID)
+{
+#if PLATFORM_WINDOWS
+    if (DeviceID.IsEmpty()) return -1.0f;
+    FLocalComInit ComInit;
+
+    ComPtr<IMMDeviceEnumerator> Enumerator;
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator));
+    if (FAILED(hr)) return -1.0f;
+
+    ComPtr<IMMDevice> Device;
+    hr = Enumerator->GetDevice(*DeviceID, &Device);
+    if (FAILED(hr)) return -1.0f;
+
+    ComPtr<IAudioEndpointVolume> Endpoint;
+    hr = Device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &Endpoint);
+
+    if (SUCCEEDED(hr))
+    {
+        float CurrentVolume = 0.0f;
+        if (SUCCEEDED(Endpoint->GetMasterVolumeLevelScalar(&CurrentVolume)))
+        {
+            return CurrentVolume;
+        }
+    }
+#endif
+    return -1.0f;
+}
+
+float UAudioSystemLibrary::GetInputDeviceVolume(const FString& DeviceID)
+{
+    //As you can see the same function can do the job for input & input, but i just want to split them :D
+    return GetOutputDeviceVolume(DeviceID);
+}
+
+
+float UAudioSystemLibrary::GetAudioDevicePeakValue(const FString& DeviceID)
+{
+#if PLATFORM_WINDOWS
+    
+    if (DeviceID.IsEmpty()) return 0.0f;
+
+
+    FLocalComInit ComInit;
+
+    ComPtr<IMMDeviceEnumerator> Enumerator;
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator));
+    if (FAILED(hr)) return 0.0f;
+
+    ComPtr<IMMDevice> Device;
+    hr = Enumerator->GetDevice(*DeviceID, &Device);
+    if (FAILED(hr)) return 0.0f; 
+
+    ComPtr<IAudioMeterInformation> MeterInfo;
+    hr = Device->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, nullptr, &MeterInfo);
+
+    if (SUCCEEDED(hr))
+    {
+        float PeakValue = 0.0f;
+        hr = MeterInfo->GetPeakValue(&PeakValue);
+
+        if (SUCCEEDED(hr))
+        {
+            return PeakValue;
+        }
+    }
+#endif
+
+    // Default to 0 if failed, btw avoid ticking this function to avoid crashes. i told u :/
+    return 0.0f;
+}

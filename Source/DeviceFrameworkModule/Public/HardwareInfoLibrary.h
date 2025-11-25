@@ -42,7 +42,7 @@ enum class ECPUVendor : uint8
 };
 
 UCLASS()
-class USystemInfoBPLibrary : public UBlueprintFunctionLibrary
+class DEVICEFRAMEWORKMODULE_API USystemInfoBPLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
