@@ -40,7 +40,6 @@ bool UFileSystemBlueprintLibrary::MoveFileToFolder(const FString& Source, const 
     FString CleanSource = FixPath(Source);
     FString CleanDestFolder = FixPath(Destination);
 
-    // 1. Check Source
     if (!PlatformFile.FileExists(*CleanSource))
     {
         OutError = FString::Printf(TEXT("Source file does not exist: %s"), *CleanSource);
@@ -84,7 +83,6 @@ bool UFileSystemBlueprintLibrary::MoveFileToFolder(const FString& Source, const 
         }
     }
 
-    // 5. Perform Move
     if (!PlatformFile.MoveFile(*FullDestPath, *CleanSource))
     {
         if (PlatformFile.CopyFile(*FullDestPath, *CleanSource))
@@ -152,7 +150,7 @@ bool UFileSystemBlueprintLibrary::MoveFolderToFolder(const FString& Source, cons
             return true;
         }
         OutError = TEXT("Moved data successfully, but failed to delete source folder (Permissions?).");
-        return true; // Data is safe in new location
+        return true; 
     }
 
     OutError = TEXT("Failed to move folder. (Check permissions or open files).");
@@ -170,10 +168,9 @@ bool UFileSystemBlueprintLibrary::DeleteFileW(const FString& Path, FString& OutE
         return false;
     }
 
-    // Try standard delete
+
     if (PlatformFile.DeleteFile(*Target)) return true;
 
-    // If failed, try clearing Read-Only flag
     PlatformFile.SetReadOnly(*Target, false);
 
     if (PlatformFile.DeleteFile(*Target)) return true;
@@ -330,4 +327,58 @@ TArray<FPartitionInfo> UFileSystemBlueprintLibrary::GetAllAvailablePartitions()
 #endif
 
     return Partitions;
+}
+
+bool UFileSystemBlueprintLibrary::RenameFile(const FString& FilePath, const FString& NewFileName, bool bOverwrite, FString& OutError)
+{
+    IPlatformFile& PlatformFile = GetPlatformFile();
+
+    FString CleanSource = FixPath(FilePath);
+
+    if (!PlatformFile.FileExists(*CleanSource))
+    {
+        OutError = FString::Printf(TEXT("Source file does not exist: %s"), *CleanSource);
+        return false;
+    }
+
+    FString ParentDir = FPaths::GetPath(CleanSource);
+    FString CleanNewName = FPaths::GetCleanFilename(NewFileName); 
+    FString FullDestPath = FPaths::Combine(ParentDir, CleanNewName);
+
+    FPaths::NormalizeFilename(FullDestPath);
+
+    if (PlatformFile.FileExists(*FullDestPath))
+    {
+        if (bOverwrite)
+        {
+            if (!PlatformFile.DeleteFile(*FullDestPath))
+            {
+                PlatformFile.SetReadOnly(*FullDestPath, false);
+                if (!PlatformFile.DeleteFile(*FullDestPath))
+                {
+                    OutError = TEXT("Target filename exists and cannot be overwritten (Locked/ReadOnly).");
+                    return false;
+                }
+            }
+        }
+        else
+        {
+            OutError = FString::Printf(TEXT("A file with the name '%s' already exists in this directory."), *CleanNewName);
+            return false;
+        }
+    }
+
+    if (!PlatformFile.MoveFile(*FullDestPath, *CleanSource))
+    {
+        if (PlatformFile.CopyFile(*FullDestPath, *CleanSource))
+        {
+            PlatformFile.DeleteFile(*CleanSource);
+            return true;
+        }
+
+        OutError = TEXT("Failed to rename file (Unknown OS Error).");
+        return false;
+    }
+
+    return true;
 }

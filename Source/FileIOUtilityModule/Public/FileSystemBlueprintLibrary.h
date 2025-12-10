@@ -112,4 +112,8 @@ public:
     //Show a list of all partitions avaialable in the system & give you huge variaty of information for each partition.
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Files Management", meta = (DisplayName = "Get All Available Paritions"))
     static TArray<FPartitionInfo> GetAllAvailablePartitions();
+
+    //Will rename your file - note that you should also enter the file extantion to not corupt it !
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (DisplayName = "Rename File"))
+    static bool RenameFile(const FString& FilePath, const FString& NewFileName, bool bOverwrite, FString& OutError);
 };

@@ -17,25 +17,43 @@ public class NetworkUtilityModule : ModuleRules
         {
             "Core",
             "CoreUObject",
-            "Engine",
-            "Networking", 
-            "Sockets"  
+            "Engine"
+        });
+
+        PublicDependencyModuleNames.AddRange(new string[]
+        {
+            "Networking",
+            "Sockets",
+            "HTTP",
+            "Json" 
+        });
+
+        PublicDependencyModuleNames.AddRange(new string[]
+        {
+            "libcurl",
+            "OpenSSL"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
+           
         });
+
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             PublicSystemLibraries.AddRange(new string[]
             {
-                "iphlpapi.lib",   // Network adapter APIs
-                "ws2_32.lib",     // Winsock
-                "wlanapi.lib",    // WLAN (Wi-Fi)
-                "wininet.lib",    // WinINet
-                "setupapi.lib",   //For BT Class
-                "BluetoothApis.lib" //Same bt
+                "iphlpapi.lib",      // Network Adapter Info (GetAdaptersAddresses)
+                "ws2_32.lib",        // Winsock 2 (Sockets, IP conversion)
+                "wlanapi.lib",       // Wi-Fi Specifics
+                "wininet.lib",       // Internet Extensions
+                "setupapi.lib",      // Device Setup (Bluetooth/Hardware IDs)
+                "BluetoothApis.lib"  // Bluetooth
             });
+
+            AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
+            AddEngineThirdPartyPrivateStaticDependencies(Target, "zlib");
+            AddEngineThirdPartyPrivateStaticDependencies(Target, "nghttp2");
         }
     }
 }

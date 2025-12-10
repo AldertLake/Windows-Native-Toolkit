@@ -31,6 +31,8 @@ public class DeviceFrameworkModule : ModuleRules
                 "Advapi32.lib",
                 "dxgi.lib"
             });
+
+
         }
     }
 }
