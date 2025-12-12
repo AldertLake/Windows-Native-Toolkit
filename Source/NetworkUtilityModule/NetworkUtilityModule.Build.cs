@@ -5,7 +5,7 @@
 // ---------------------------------------------------
 
 using UnrealBuildTool;
-using System.IO;
+//using System.IO;
 
 public class NetworkUtilityModule : ModuleRules
 {
@@ -13,47 +13,27 @@ public class NetworkUtilityModule : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+        // Combined all module dependencies into one array
         PublicDependencyModuleNames.AddRange(new string[]
         {
-            "Core",
-            "CoreUObject",
-            "Engine"
-        });
-
-        PublicDependencyModuleNames.AddRange(new string[]
-        {
-            "Networking",
-            "Sockets",
-            "HTTP",
-            "Json" 
-        });
-
-        PublicDependencyModuleNames.AddRange(new string[]
-        {
-            "libcurl",
-            "OpenSSL"
-        });
-
-        PrivateDependencyModuleNames.AddRange(new string[]
-        {
-           
+            "Core", "CoreUObject", "Engine", "Json",
+            "Networking", "Sockets", "HTTP", "libcurl", "OpenSSL"
         });
 
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
+            bEnableExceptions = true;
+
+            // Combined all Windows libraries into one array
             PublicSystemLibraries.AddRange(new string[]
             {
-                "iphlpapi.lib",      // Network Adapter Info (GetAdaptersAddresses)
-                "ws2_32.lib",        // Winsock 2 (Sockets, IP conversion)
-                "wlanapi.lib",       // Wi-Fi Specifics
-                "wininet.lib",       // Internet Extensions
-                "setupapi.lib",      // Device Setup (Bluetooth/Hardware IDs)
-                "BluetoothApis.lib"  // Bluetooth
+                "iphlpapi.lib", "ws2_32.lib", "wininet.lib",     
+                "wlanapi.lib", "setupapi.lib", "BluetoothApis.lib", 
+                "WindowsApp.lib", "Shlwapi.lib", "RuntimeObject.lib" 
             });
 
-            AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
-            AddEngineThirdPartyPrivateStaticDependencies(Target, "zlib");
-            AddEngineThirdPartyPrivateStaticDependencies(Target, "nghttp2");
+            // Combined ThirdParty Static Dependencies into one line
+            AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL", "zlib", "nghttp2");
         }
     }
 }
