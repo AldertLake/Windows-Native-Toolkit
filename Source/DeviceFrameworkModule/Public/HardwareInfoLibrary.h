@@ -112,7 +112,7 @@ public:
     static void ForceKillGame();
 
 
-    // --- Deprecated Function List
+    // --- Deprecated Function List - THEY ARE DEPRECATED AT 2.3 & NOW WE ARE AT 2.4.1
 
     //Retrieves GPU details: name, manufacturer, VRAM stats, and current game VRAM usage in megabytes (DeprecatedFunction)
     //Warning : Never use this function it is an DeprecatedFunction & you should insted use the modern ones.

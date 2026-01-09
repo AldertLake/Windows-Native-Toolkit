@@ -19,21 +19,31 @@
 
 using namespace Microsoft::WRL;
 
-struct FLocalComInit
-{
-    FLocalComInit() { CoInitialize(nullptr); }
-    ~FLocalComInit() { CoUninitialize(); }
-};
-#endif
+static ComPtr<IMMDeviceEnumerator> GlobalEnumerator = nullptr;
 
-#if PLATFORM_WINDOWS
-static bool GetDefaultAudioEndpoint(ComPtr<IAudioEndpointVolume>& OutEndpoint, ComPtr<IMMDevice>& OutDevice)
+static bool GetEnumerator(ComPtr<IMMDeviceEnumerator>& OutEnumerator)
+{
+    if (GlobalEnumerator)
+    {
+        OutEnumerator = GlobalEnumerator;
+        return true;
+    }
+
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&GlobalEnumerator));
+    if (SUCCEEDED(hr))
+    {
+        OutEnumerator = GlobalEnumerator;
+        return true;
+    }
+    return false;
+}
+
+static bool GetDefaultAudioEndpoint(EDataFlow DataFlow, ComPtr<IAudioEndpointVolume>& OutEndpoint, ComPtr<IMMDevice>& OutDevice)
 {
     ComPtr<IMMDeviceEnumerator> Enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator));
-    if (FAILED(hr)) return false;
+    if (!GetEnumerator(Enumerator)) return false;
 
-    hr = Enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &OutDevice);
+    HRESULT hr = Enumerator->GetDefaultAudioEndpoint(DataFlow, eConsole, &OutDevice);
     if (FAILED(hr)) return false;
 
     hr = OutDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &OutEndpoint);
@@ -44,11 +54,10 @@ static bool GetDefaultAudioEndpoint(ComPtr<IAudioEndpointVolume>& OutEndpoint, C
 float UAudioSystemLibrary::GetSystemVolume()
 {
 #if PLATFORM_WINDOWS
-    FLocalComInit ComInit;
     ComPtr<IAudioEndpointVolume> Endpoint;
     ComPtr<IMMDevice> Device;
 
-    if (GetDefaultAudioEndpoint(Endpoint, Device))
+    if (GetDefaultAudioEndpoint(eRender, Endpoint, Device))
     {
         float CurrentVolume = 0.0f;
         if (SUCCEEDED(Endpoint->GetMasterVolumeLevelScalar(&CurrentVolume)))
@@ -63,11 +72,10 @@ float UAudioSystemLibrary::GetSystemVolume()
 void UAudioSystemLibrary::SetSystemVolume(float Volume)
 {
 #if PLATFORM_WINDOWS
-    FLocalComInit ComInit;
     ComPtr<IAudioEndpointVolume> Endpoint;
     ComPtr<IMMDevice> Device;
 
-    if (GetDefaultAudioEndpoint(Endpoint, Device))
+    if (GetDefaultAudioEndpoint(eRender, Endpoint, Device))
     {
         Endpoint->SetMasterVolumeLevelScalar(FMath::Clamp(Volume, 0.0f, 1.0f), nullptr);
     }
@@ -77,10 +85,8 @@ void UAudioSystemLibrary::SetSystemVolume(float Volume)
 FString UAudioSystemLibrary::GetCurrentAudioDeviceName()
 {
 #if PLATFORM_WINDOWS
-    FLocalComInit ComInit;
     ComPtr<IMMDeviceEnumerator> Enumerator;
-    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator))))
-        return TEXT("Unknown");
+    if (!GetEnumerator(Enumerator)) return TEXT("Unknown");
 
     ComPtr<IMMDevice> Device;
     if (FAILED(Enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &Device)))
@@ -103,21 +109,39 @@ FString UAudioSystemLibrary::GetCurrentAudioDeviceName()
     return TEXT("Unknown");
 }
 
-// --- OUTPUT DEVICES ---
-
 TArray<FAudioDeviceInfo> UAudioSystemLibrary::GetAllAudioOutputDevices()
 {
     TArray<FAudioDeviceInfo> Result;
 #if PLATFORM_WINDOWS
-    FLocalComInit ComInit;
-
     ComPtr<IMMDeviceEnumerator> Enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator));
-    if (FAILED(hr)) return Result;
+    if (!GetEnumerator(Enumerator)) return Result;
+
+    FString DefaultConsoleID;
+    FString DefaultCommID;
+    LPWSTR wstrDefID = nullptr;
+    ComPtr<IMMDevice> DefDevice;
+
+    if (SUCCEEDED(Enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &DefDevice)))
+    {
+        if (SUCCEEDED(DefDevice->GetId(&wstrDefID)))
+        {
+            DefaultConsoleID = FString(wstrDefID);
+            CoTaskMemFree(wstrDefID);
+        }
+    }
+
+    DefDevice.Reset();
+    if (SUCCEEDED(Enumerator->GetDefaultAudioEndpoint(eRender, eCommunications, &DefDevice)))
+    {
+        if (SUCCEEDED(DefDevice->GetId(&wstrDefID)))
+        {
+            DefaultCommID = FString(wstrDefID);
+            CoTaskMemFree(wstrDefID);
+        }
+    }
 
     ComPtr<IMMDeviceCollection> Collection;
-    hr = Enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &Collection);
-    if (FAILED(hr)) return Result;
+    if (FAILED(Enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &Collection))) return Result;
 
     UINT Count = 0;
     Collection->GetCount(&Count);
@@ -129,10 +153,17 @@ TArray<FAudioDeviceInfo> UAudioSystemLibrary::GetAllAudioOutputDevices()
         {
             FAudioDeviceInfo Info;
             LPWSTR wstrID = nullptr;
+
             if (SUCCEEDED(Device->GetId(&wstrID)))
             {
                 Info.DeviceID = FString(wstrID);
                 CoTaskMemFree(wstrID);
+            }
+
+            if (!Info.DeviceID.IsEmpty())
+            {
+                if (Info.DeviceID == DefaultConsoleID) Info.bIsDefaultDevice = true;
+                if (Info.DeviceID == DefaultCommID)    Info.bIsCommunicationDevice = true;
             }
 
             ComPtr<IPropertyStore> Props;
@@ -157,42 +188,54 @@ void UAudioSystemLibrary::SetVolumeForDevice(const FString& DeviceID, float Volu
 {
 #if PLATFORM_WINDOWS
     if (DeviceID.IsEmpty()) return;
-    FLocalComInit ComInit;
 
     ComPtr<IMMDeviceEnumerator> Enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator));
-    if (FAILED(hr)) return;
+    if (!GetEnumerator(Enumerator)) return;
 
     ComPtr<IMMDevice> Device;
-    hr = Enumerator->GetDevice(*DeviceID, &Device);
-    if (FAILED(hr)) return;
+    if (FAILED(Enumerator->GetDevice(*DeviceID, &Device))) return;
 
     ComPtr<IAudioEndpointVolume> Endpoint;
-    hr = Device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &Endpoint);
-
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(Device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &Endpoint)))
     {
         Endpoint->SetMasterVolumeLevelScalar(FMath::Clamp(Volume, 0.0f, 1.0f), nullptr);
     }
 #endif
 }
 
-// --- INPUT DEVICES ---
-
 TArray<FAudioDeviceInfo> UAudioSystemLibrary::GetAllAudioInputDevices()
 {
     TArray<FAudioDeviceInfo> Result;
 #if PLATFORM_WINDOWS
-    FLocalComInit ComInit;
-
     ComPtr<IMMDeviceEnumerator> Enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator));
-    if (FAILED(hr)) return Result;
+    if (!GetEnumerator(Enumerator)) return Result;
+
+    FString DefaultConsoleID;
+    FString DefaultCommID;
+    LPWSTR wstrDefID = nullptr;
+    ComPtr<IMMDevice> DefDevice;
+
+    if (SUCCEEDED(Enumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &DefDevice)))
+    {
+        if (SUCCEEDED(DefDevice->GetId(&wstrDefID)))
+        {
+            DefaultConsoleID = FString(wstrDefID);
+            CoTaskMemFree(wstrDefID);
+        }
+    }
+
+    DefDevice.Reset();
+    if (SUCCEEDED(Enumerator->GetDefaultAudioEndpoint(eCapture, eCommunications, &DefDevice)))
+    {
+        if (SUCCEEDED(DefDevice->GetId(&wstrDefID)))
+        {
+            DefaultCommID = FString(wstrDefID);
+            CoTaskMemFree(wstrDefID);
+        }
+    }
 
     ComPtr<IMMDeviceCollection> Collection;
-
-    hr = Enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &Collection);
-    if (FAILED(hr)) return Result;
+    if (FAILED(Enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &Collection))) return Result;
 
     UINT Count = 0;
     Collection->GetCount(&Count);
@@ -204,10 +247,17 @@ TArray<FAudioDeviceInfo> UAudioSystemLibrary::GetAllAudioInputDevices()
         {
             FAudioDeviceInfo Info;
             LPWSTR wstrID = nullptr;
+
             if (SUCCEEDED(Device->GetId(&wstrID)))
             {
                 Info.DeviceID = FString(wstrID);
                 CoTaskMemFree(wstrID);
+            }
+
+            if (!Info.DeviceID.IsEmpty())
+            {
+                if (Info.DeviceID == DefaultConsoleID) Info.bIsDefaultDevice = true;
+                if (Info.DeviceID == DefaultCommID)    Info.bIsCommunicationDevice = true;
             }
 
             ComPtr<IPropertyStore> Props;
@@ -232,21 +282,15 @@ void UAudioSystemLibrary::SetInputVolumeForDevice(const FString& DeviceID, float
 {
 #if PLATFORM_WINDOWS
     if (DeviceID.IsEmpty()) return;
-    FLocalComInit ComInit;
 
     ComPtr<IMMDeviceEnumerator> Enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator));
-    if (FAILED(hr)) return;
+    if (!GetEnumerator(Enumerator)) return;
 
     ComPtr<IMMDevice> Device;
-
-    hr = Enumerator->GetDevice(*DeviceID, &Device);
-    if (FAILED(hr)) return;
+    if (FAILED(Enumerator->GetDevice(*DeviceID, &Device))) return;
 
     ComPtr<IAudioEndpointVolume> Endpoint;
-    hr = Device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &Endpoint);
-
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(Device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &Endpoint)))
     {
         Endpoint->SetMasterVolumeLevelScalar(FMath::Clamp(Volume, 0.0f, 1.0f), nullptr);
     }
@@ -257,20 +301,15 @@ float UAudioSystemLibrary::GetOutputDeviceVolume(const FString& DeviceID)
 {
 #if PLATFORM_WINDOWS
     if (DeviceID.IsEmpty()) return -1.0f;
-    FLocalComInit ComInit;
 
     ComPtr<IMMDeviceEnumerator> Enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator));
-    if (FAILED(hr)) return -1.0f;
+    if (!GetEnumerator(Enumerator)) return -1.0f;
 
     ComPtr<IMMDevice> Device;
-    hr = Enumerator->GetDevice(*DeviceID, &Device);
-    if (FAILED(hr)) return -1.0f;
+    if (FAILED(Enumerator->GetDevice(*DeviceID, &Device))) return -1.0f;
 
     ComPtr<IAudioEndpointVolume> Endpoint;
-    hr = Device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &Endpoint);
-
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(Device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &Endpoint)))
     {
         float CurrentVolume = 0.0f;
         if (SUCCEEDED(Endpoint->GetMasterVolumeLevelScalar(&CurrentVolume)))
@@ -284,43 +323,29 @@ float UAudioSystemLibrary::GetOutputDeviceVolume(const FString& DeviceID)
 
 float UAudioSystemLibrary::GetInputDeviceVolume(const FString& DeviceID)
 {
-    //As you can see the same function can do the job for input & input, but i just want to split them :D
     return GetOutputDeviceVolume(DeviceID);
 }
-
 
 float UAudioSystemLibrary::GetAudioDevicePeakValue(const FString& DeviceID)
 {
 #if PLATFORM_WINDOWS
-    
     if (DeviceID.IsEmpty()) return 0.0f;
 
-
-    FLocalComInit ComInit;
-
     ComPtr<IMMDeviceEnumerator> Enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&Enumerator));
-    if (FAILED(hr)) return 0.0f;
+    if (!GetEnumerator(Enumerator)) return 0.0f;
 
     ComPtr<IMMDevice> Device;
-    hr = Enumerator->GetDevice(*DeviceID, &Device);
-    if (FAILED(hr)) return 0.0f; 
+    if (FAILED(Enumerator->GetDevice(*DeviceID, &Device))) return 0.0f;
 
     ComPtr<IAudioMeterInformation> MeterInfo;
-    hr = Device->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, nullptr, &MeterInfo);
-
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(Device->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, nullptr, &MeterInfo)))
     {
         float PeakValue = 0.0f;
-        hr = MeterInfo->GetPeakValue(&PeakValue);
-
-        if (SUCCEEDED(hr))
+        if (SUCCEEDED(MeterInfo->GetPeakValue(&PeakValue)))
         {
             return PeakValue;
         }
     }
 #endif
-
-    // Default to 0 if failed, btw avoid ticking this function to avoid crashes. i told u :/
     return 0.0f;
 }

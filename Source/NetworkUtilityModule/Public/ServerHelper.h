@@ -38,6 +38,7 @@ public:
     bool IsValid() const { return CancelFlag.IsValid(); }
 };
 
+//Class experimental & still under developement - do not use any function here !
 UCLASS()
 class NETWORKUTILITYMODULE_API UFTPManager : public UBlueprintFunctionLibrary
 {
@@ -50,7 +51,7 @@ public:
      * @param URL - The folder URL (e.g. ftp://ftpupload.net/htdocs/)
      * @param LocalFilePath - Full path to file (e.g. C:\Images\My Photo.png)
      */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|FTP Server Management", meta = (AutoCreateRefTerm = "OnProgress, OnComplete", DisplayName = "Upload File Using FTP"))
+    //UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|FTP Server Management", meta = (AutoCreateRefTerm = "OnProgress, OnComplete", DisplayName = "Upload File Using FTP"))
     static FFTPTransferHandle UploadFile(
         FString URL,
         FString User,
@@ -65,7 +66,7 @@ public:
      * @param URL - Full file URL (e.g. ftp://site.com/file.zip)
      * @param SaveDirectory - JUST the folder to save in (e.g. D:\Downloads\)
      */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|FTP Server Management", meta = (AutoCreateRefTerm = "OnProgress, OnComplete", DisplayName = "Download File Using FTP"))
+    //UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|FTP Server Management", meta = (AutoCreateRefTerm = "OnProgress, OnComplete", DisplayName = "Download File Using FTP"))
     static FFTPTransferHandle DownloadFile(
         FString URL,
         FString User,
@@ -76,7 +77,7 @@ public:
     );
 
     //Cancel transfer of the file - note that cancel does not mean delete meaning in the server side the transfer will be canceled & not deleted.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|FTP Server Management", meta = (DisplayName = "Cancel FTP Operation"))
+    //UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|FTP Server Management", meta = (DisplayName = "Cancel FTP Operation"))
     static void CancelTransfer(FFTPTransferHandle Handle);
 
 };

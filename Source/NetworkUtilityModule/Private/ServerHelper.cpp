@@ -270,4 +270,4 @@ FFTPTransferHandle UFTPManager::DownloadFile(FString URL, FString User, FString 
 
 // --- HTTPS SERVER OPERATIONS --- 
 
-//Comming soon, i just need server for testing since my free hosting shity host is not allowing automated upload without a browser.
+//SOON

@@ -7,7 +7,8 @@
 #include "HardwareInfoLibrary.h"
 
 #include "HardwareInfo.h"            
-#include "RHI.h"                   
+#include "RHI.h"
+#include "Misc/ScopeLock.h"
 #include "HAL/PlatformMisc.h"      
 #include "Misc/ConfigCacheIni.h"    
 #include "Misc/CoreDelegates.h" 
@@ -16,63 +17,97 @@
 #include "Windows/AllowWindowsPlatformTypes.h"
 #include "Windows/WindowsSystemIncludes.h"
 #include <dxgi1_4.h>
+#include <wrl/client.h>
 #include <Xinput.h>
 #include <shellapi.h> //for cmd things..
 #include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
-// --- PRIVATE HELPER FUNCTION ---
+//Important for vram query..since there is multi
 
-static bool QueryGPUStats(int32& OutTotalMB, int32& OutBudgetMB, int32& OutUsageMB)
-{
-    OutTotalMB = 0;
-    OutBudgetMB = 0;
-    OutUsageMB = 0;
+// --- VRAM HELPERS & CACHE ---
+
+using namespace Microsoft::WRL;
 
 #if PLATFORM_WINDOWS
-    IDXGIFactory4* pFactory = nullptr;
-    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory4), (void**)&pFactory)))
+static FCriticalSection AdapterCacheMutex;
+static ComPtr<IDXGIAdapter3> CachedAdapter = nullptr;
+
+static bool GetCachedAdapter(ComPtr<IDXGIAdapter3>& OutAdapter)
+{
+    FScopeLock Lock(&AdapterCacheMutex);
+
+    if (CachedAdapter)
+    {
+        OutAdapter = CachedAdapter;
+        return true;
+    }
+
+    ComPtr<IDXGIFactory4> Factory;
+
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&Factory))))
     {
         return false;
     }
 
-    IDXGIAdapter3* pAdapter = nullptr;
-    uint32 AdapterIndex = 0;
+    ComPtr<IDXGIAdapter1> TempAdapter1;
+    uint32 Index = 0;
     bool bFound = false;
 
-    const uint32 TargetVendorId = GRHIVendorId;
-
-    while (pFactory->EnumAdapters(AdapterIndex, reinterpret_cast<IDXGIAdapter**>(&pAdapter)) != DXGI_ERROR_NOT_FOUND)
+    while (Factory->EnumAdapters1(Index, &TempAdapter1) != DXGI_ERROR_NOT_FOUND)
     {
-        DXGI_ADAPTER_DESC desc;
-        pAdapter->GetDesc(&desc);
+        DXGI_ADAPTER_DESC1 Desc;
+        TempAdapter1->GetDesc1(&Desc);
 
-        if (desc.VendorId == TargetVendorId || TargetVendorId == 0)
+        if (Desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
         {
-            OutTotalMB = static_cast<int32>(desc.DedicatedVideoMemory / 1024 / 1024);
-
-            DXGI_QUERY_VIDEO_MEMORY_INFO videoMemoryInfo;
-            if (SUCCEEDED(pAdapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &videoMemoryInfo)))
-            {
-                OutUsageMB = static_cast<int32>(videoMemoryInfo.CurrentUsage / 1024 / 1024);
-                OutBudgetMB = static_cast<int32>(videoMemoryInfo.Budget / 1024 / 1024);
-            }
-            bFound = true;
+            Index++;
+            continue;
         }
 
-        pAdapter->Release();
-        if (bFound) break;
-        AdapterIndex++;
+        if (Desc.VendorId == GRHIVendorId || GRHIVendorId == 0)
+        {
+            if (SUCCEEDED(TempAdapter1.As(&CachedAdapter)))
+            {
+                OutAdapter = CachedAdapter;
+                bFound = true;
+                break;
+            }
+        }
+        Index++;
     }
 
-    pFactory->Release();
     return bFound;
-#else
-    return false;
-#endif
 }
 
+static bool QueryGPUStats(int32& OutTotalMB, int32& OutBudgetMB, int32& OutUsageMB)
+{
+    OutTotalMB = OutBudgetMB = OutUsageMB = 0;
 
+    ComPtr<IDXGIAdapter3> Adapter;
+    if (GetCachedAdapter(Adapter))
+    {
+        DXGI_ADAPTER_DESC1 Desc;
+        if (SUCCEEDED(Adapter->GetDesc1(&Desc)))
+        {
+            OutTotalMB = (int32)(Desc.DedicatedVideoMemory / 1024 / 1024);
+        }
+        else
+        {
+            return false;
+        }
+
+        DXGI_QUERY_VIDEO_MEMORY_INFO Info;
+        if (SUCCEEDED(Adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &Info)))
+        {
+            OutUsageMB = (int32)(Info.CurrentUsage / 1024 / 1024);
+            OutBudgetMB = (int32)(Info.Budget / 1024 / 1024);
+            return true;
+        }
+    }
+    return false;
+}
+#endif
 
 // --- PUBLIC BP FUNCTIONS ---
 
@@ -84,15 +119,11 @@ void USystemInfoBPLibrary::GetMemoryInfo(int64& TotalPhysicalMB, int64& UsedPhys
 
     if (GlobalMemoryStatusEx(&memInfo))
     {
-        // 1. PHYSICAL MEMORY (RAM)
-        // We use >> 20 to convert Bytes to MiB (matches Task Manager "MB")
+
         TotalPhysicalMB = static_cast<int64>(memInfo.ullTotalPhys >> 20);
         FreePhysicalMB = static_cast<int64>(memInfo.ullAvailPhys >> 20);
         UsedPhysicalMB = TotalPhysicalMB - FreePhysicalMB;
 
-        // 2. VIRTUAL MEMORY (Commit Limit / Page File)
-        // CRITICAL FIX: Use ullTotalPageFile, NOT ullTotalVirtual
-        // ullTotalPageFile = Physical RAM + Size of Page File on Disk
         TotalVirtualMB = static_cast<int64>(memInfo.ullTotalPageFile >> 20);
         FreeVirtualMB = static_cast<int64>(memInfo.ullAvailPageFile >> 20);
         UsedVirtualMB = TotalVirtualMB - FreeVirtualMB;
@@ -224,50 +255,61 @@ void USystemInfoBPLibrary::GetGPUNameAndManufacturer(FString& DeviceName, EGPUVe
 
 int32 USystemInfoBPLibrary::GetTotalVRAMMB()
 {
-    // We cache this value because Total VRAM never changes while the game is running.
+#if PLATFORM_WINDOWS
     static int32 CachedTotalVRAM = -1;
+
+    static FCriticalSection VRAMCacheMutex;
+    FScopeLock Lock(&VRAMCacheMutex);
 
     if (CachedTotalVRAM < 0)
     {
         int32 Budget, Usage;
-        QueryGPUStats(CachedTotalVRAM, Budget, Usage);
+        int32 TempTotal = 0;
+
+        if (QueryGPUStats(TempTotal, Budget, Usage))
+        {
+            CachedTotalVRAM = TempTotal;
+        }
     }
 
-    return CachedTotalVRAM;
+    return (CachedTotalVRAM < 0) ? 0 : CachedTotalVRAM;
+#else
+    return 0;
+#endif
 }
 
 int32 USystemInfoBPLibrary::GetGameVRAMUsageMB()
 {
+#if PLATFORM_WINDOWS
     int32 Total, Budget, Usage;
     if (QueryGPUStats(Total, Budget, Usage))
     {
         return Usage;
     }
+#endif
     return 0;
 }
 
 int32 USystemInfoBPLibrary::GetUsedVRAMMB()
 {
+#if PLATFORM_WINDOWS
     int32 Total, Budget, Usage;
     if (QueryGPUStats(Total, Budget, Usage))
     {
 
-
         int32 SystemOverhead = Total - Budget;
         int32 GlobalUsed = SystemOverhead + Usage;
 
-        if (GlobalUsed > Total) GlobalUsed = Total;
-        if (GlobalUsed < 0) GlobalUsed = 0;
-
-        return GlobalUsed;
+        return FMath::Clamp(GlobalUsed, 0, Total);
     }
+#endif
     return 0;
 }
 
 void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, bool& HasKeyboard)
 {
     UINT nDevices = 0;
-    // Get the number of devices
+
     GetRawInputDeviceList(NULL, &nDevices, sizeof(RAWINPUTDEVICELIST));
 
     if (nDevices == 0)
@@ -277,11 +319,11 @@ void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, boo
     }
     else
     {
-        // Allocate memory for the device list
+
         TArray<RAWINPUTDEVICELIST> DeviceList;
         DeviceList.SetNumUninitialized(nDevices);
 
-        // Retrieve the device list
+
         GetRawInputDeviceList(DeviceList.GetData(), &nDevices, sizeof(RAWINPUTDEVICELIST));
 
         HasMouse = false;
@@ -321,16 +363,16 @@ void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, boo
 
 EGraphicsRHI USystemInfoBPLibrary::GetRHIName()
 {
-    // Safety Check: If running on a server or commandlet with no RHI
+
     if (!GDynamicRHI)
     {
         return EGraphicsRHI::Unknown;
     }
 
-    // Get the authoritative name directly from the driver
+
     FString RHIName = FString(GDynamicRHI->GetName());
 
-    // Map to Enum
+
     if (RHIName == TEXT("D3D12"))           return EGraphicsRHI::DirectX12;
     if (RHIName == TEXT("D3D11"))           return EGraphicsRHI::DirectX11;
     if (RHIName.StartsWith(TEXT("Vulkan"))) return EGraphicsRHI::Vulkan;
@@ -442,18 +484,18 @@ bool USystemInfoBPLibrary::ExecuteWindowsCMD(const FString& Command, bool bRunAs
     }
     else
     {
-        // --- FIX IS HERE ---
+
         FProcHandle Handle = FPlatformProcess::CreateProc(
-            TEXT("cmd.exe"), // 1. URL
-            *Params,         // 2. Parms
-            true,            // 3. bLaunchDetached
-            bHidden,         // 4. bLaunchHidden
-            bHidden,         // 5. bLaunchReallyHidden
-            nullptr,         // 6. OutProcessID (Pointer is fine here)
-            0,               // 7. PriorityModifier (MUST BE INT, NOT NULLPTR)
-            nullptr,         // 8. OptionalWorkingDirectory
-            nullptr          // 9. PipeWriteChild
-            // 10. PipeReadChild (Optional, defaults to nullptr)
+            TEXT("cmd.exe"), 
+            *Params,        
+            true,       
+            bHidden,       
+            bHidden,      
+            nullptr,     
+            0,          
+            nullptr,  
+            nullptr      
+
         );
 
         return Handle.IsValid();
