@@ -82,7 +82,7 @@ public:
     // --- Get Network Interfaces & Informations About Them --- 
 
     //Gather all available network interfaces from windows system, will return array of a structure holding informations about the interface.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Get Available Network Interfaces"))
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Get Available Network Interfaces"))
     static TArray<FNetworkInterfaceInfo> GetAvailableInterfaces();
 
     //Get the Wifi Name (SSID), need ID that will be gathered using GetAvailableInterfaces(), Verify if interface is a WIFI before running it.

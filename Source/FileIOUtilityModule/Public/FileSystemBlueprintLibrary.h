@@ -114,6 +114,7 @@ public:
     static TArray<FPartitionInfo> GetAllAvailablePartitions();
 
     //Will rename your file - note that you should also enter the file extantion to not corupt it !
+    //Exemple : I want to rename Hello.txt to World. I should Enter World.txt Nor World Only !
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (DisplayName = "Rename File"))
     static bool RenameFile(const FString& FilePath, const FString& NewFileName, bool bOverwrite, FString& OutError);
 };
