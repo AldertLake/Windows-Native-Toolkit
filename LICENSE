@@ -1,55 +1,23 @@
-Copyright 2025 AldertLake
+Copyright (c) 2026 AldertLake
 
-All rights reserved.
+This license applies only to the free GitHub version of this product.
 
-TERMS AND CONDITIONS FOR USE
+Prtions of this toolkit may interact with native Windows APIs; use of those APIs is subject to Microsoft's terms of service.
 
-1. Definitions
+Permissions:
+- You may use, copy, and modify this product for personal projects.
+- You may include modified versions of this product in your own projects.
+- You may sell projects or products that include modified versions of this product.
+- You may share the original or modified product for free.
 
-- "You" means any individual or legal entity accessing or using the Work.
+Restrictions:
+- You may not sell, license, rent, or charge money for the original unmodified product by itself.
+- You may not claim that you created the original product.
+- You may not remove or hide the original copyright notice.
 
-- "Work" means the original code or software distributed under this License.
+Disclaimer:
+- This product is provided “as is”, without warranty of any kind.
+- The author is not responsible for any damages, issues, or losses caused by using this product.
 
-2. License Grant
-
-Subject to these terms, You are granted a limited, non-exclusive, non-transferable, revocable license solely to use the Work for your personal or internal purposes.
-
-3. Prohibited Actions
-
-You MAY NOT:
-
-- Redistribute, share, or distribute the Work in any form or medium, whether modified or unmodified, unless expressly authorized in writing by the Licensor.
-
-- Resell, sublicense, lease, rent, or otherwise commercialize the Work or any derivative thereof.
-
-- Modify, adapt, translate, or create derivative works based on the Work and redistribute or share such modified versions.
-
-- Obtain the Work from any source other than authorized distribution channels designated by the Licensor.
-
-4. Ownership and Copyright
-
-All rights, title, and interest in and to the Work, including all copyrights and intellectual property rights, remain solely with the Licensor.
-
-5. No Warranty
-
-The Work is provided "AS IS," without warranties or guarantees of any kind.
-
-6. Termination
-
-Any violation of these terms will result in immediate termination of your license to use the Work.
-
-7. Governing Law
-
-This License is governed by the laws of [Your Jurisdiction].
-
----
-
-Summary:
-
-- You can only use the Work as-is.
-
-- No redistribution or resale without written permission.
-
-- No modifications allowed for redistribution.
-
-- Use only authorized sources.
+Marketplace Notice:
+- The Fab Marketplace version of this product is governed by the Fab license, not this GitHub license.
