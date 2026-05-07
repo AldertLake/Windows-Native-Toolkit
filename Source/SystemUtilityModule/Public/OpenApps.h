@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #pragma once
 
@@ -10,6 +10,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "OpenApps.generated.h"
 
+/** Native Windows external-process and window-management helper nodes for Blueprints. */
 UCLASS()
 class SYSTEMUTILITYMODULE_API UOpenApps : public UBlueprintFunctionLibrary
 {
@@ -17,29 +18,21 @@ class SYSTEMUTILITYMODULE_API UOpenApps : public UBlueprintFunctionLibrary
 
 public:
 
-    //Open An App by paths 
-    //Note that it was replaced with LaunchExternalProcess.
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Process Management|External Apps", meta = (DeprecatedFunction, DeprecationMessage = "This function was replaced with LaunchExternalProcess"))
-    static bool OpenApplication(const FString& ExePath);
-
-    //Verify If An App Is Running.
-    //Note that it was replaced with IsProcessRunning (using process ID insted of path)
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Process Management|External Apps", meta = (DeprecatedFunction, DeprecationMessage = "This function was replaced with IsProcessRunning"))
-    static bool IsAppRunning(const FString& ExePath);
-
-    //Launch external application process & return the app ID.
-    //You can use this ID to verify if the app is still running.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|External Apps")
+    /** Launches an external executable and returns the best process ID found for it. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|External Apps", meta = (DisplayName = "Launch App"))
     static int32 LaunchExternalProcess(const FString& ExePath, const FString& Arguments, bool bHidden);
 
-    //Kills a process AND its entire family tree (Children/Sub-processes).
-    //Note : This function is not recommanded to use & still Experimental.
-    //Will fail in most cases.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|External Apps")
+    /** Terminates a process and its child processes when the OS allows it. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|External Apps", meta = (DisplayName = "Kill Process Tree"))
     static bool KillProcessTree(int32 ProcessID);
 
-    //Verify if a process is running or not.
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Process Management|External Apps")
+    /** Returns true when a process ID is still running. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Process Management|External Apps", meta = (DisplayName = "Is Process Running"))
     static bool IsProcessRunning(int32 ProcessID);
 
+    /** Brings the main visible window for a process to the foreground. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|External Apps", meta = (DisplayName = "Focus App"))
+    static bool BringAppToFront(int32 ProcessID);
+
 };
+

@@ -1,16 +1,20 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #include "ServerHelper.h"
 
 #include "Async/Async.h"
-#include "HAL/PlatformFilemanager.h"
+#include "HAL/PlatformFileManager.h"
 #include "GenericPlatform/GenericPlatformHttp.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
+#include "Misc/SecureHash.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -18,15 +22,42 @@
 #include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
-// --- FTP HELPERS --- THOSE ARE THE CORE FTP SYSTEM FUNCTIONS
-
+#if PLATFORM_WINDOWS
 struct FCurlContext
 {
     FArchive* FileArchive = nullptr;
     TSharedPtr<std::atomic<bool>, ESPMode::ThreadSafe> CancelFlag;
-    FOnFTPProgress ProgressDelegate;
+    FOnTransferProgress ProgressDelegate;
     double LastBroadcastTime = 0.0;
-    bool bIsUpload = false; 
+    bool bIsUpload = false;
+};
+
+struct FCurlEasyHandle
+{
+    CURL* Handle = nullptr;
+
+    FCurlEasyHandle()
+        : Handle(curl_easy_init())
+    {
+    }
+
+    ~FCurlEasyHandle()
+    {
+        if (Handle)
+        {
+            curl_easy_cleanup(Handle);
+        }
+    }
+
+    CURL* Get() const
+    {
+        return Handle;
+    }
+
+    bool IsValid() const
+    {
+        return Handle != nullptr;
+    }
 };
 
 static size_t WriteCallback(void* ptr, size_t size, size_t nmemb, void* stream)
@@ -35,7 +66,7 @@ static size_t WriteCallback(void* ptr, size_t size, size_t nmemb, void* stream)
 
     if (Context && Context->CancelFlag.IsValid() && Context->CancelFlag->load())
     {
-        return 0; 
+        return 0;
     }
 
     if (Context && Context->FileArchive)
@@ -53,7 +84,7 @@ static size_t ReadCallback(void* ptr, size_t size, size_t nmemb, void* stream)
 
     if (Context && Context->CancelFlag.IsValid() && Context->CancelFlag->load())
     {
-        return CURL_READFUNC_ABORT; 
+        return CURL_READFUNC_ABORT;
     }
 
     if (Context && Context->FileArchive && !Context->FileArchive->AtEnd())
@@ -79,7 +110,7 @@ static int ProgressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
     if (Context->CancelFlag.IsValid() && Context->CancelFlag->load())
     {
         UE_LOG(LogTemp, Warning, TEXT("FTP: Transfer Aborted by User via Progress Callback."));
-        return 1; 
+        return 1;
     }
 
     float Percent = 0.0f;
@@ -98,11 +129,11 @@ static int ProgressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
         Context->LastBroadcastTime = CurrentTime;
         if (Context->ProgressDelegate.IsBound())
         {
-            FOnFTPProgress DelegateCopy = Context->ProgressDelegate;
-            Async(EAsyncExecution::TaskGraph, [DelegateCopy, Percent]()
-                {
-                    DelegateCopy.ExecuteIfBound(Percent);
-                });
+            FOnTransferProgress DelegateCopy = Context->ProgressDelegate;
+            AsyncTask(ENamedThreads::GameThread, [DelegateCopy, Percent]()
+            {
+                DelegateCopy.ExecuteIfBound(Percent);
+            });
         }
     }
     return 0;
@@ -117,157 +148,349 @@ static void SetupCurlOptions(CURL* Curl, const FString& URL, const FString& User
     curl_easy_setopt(Curl, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(Curl, CURLOPT_TIMEOUT, 600L);
 
-    // Robustness
     curl_easy_setopt(Curl, CURLOPT_FTP_USE_EPSV, 0L);
     curl_easy_setopt(Curl, CURLOPT_FTP_SKIP_PASV_IP, 1L);
     curl_easy_setopt(Curl, CURLOPT_FTP_CREATE_MISSING_DIRS, 2L);
-    curl_easy_setopt(Curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(Curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(Curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(Curl, CURLOPT_SSL_VERIFYHOST, 2L);
 
-    // Progress
     curl_easy_setopt(Curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(Curl, CURLOPT_XFERINFOFUNCTION, ProgressCallback);
     curl_easy_setopt(Curl, CURLOPT_XFERINFODATA, Context);
 
-    // Debugging bs
 #if !UE_BUILD_SHIPPING
     curl_easy_setopt(Curl, CURLOPT_VERBOSE, 1L);
 #endif
 }
+#endif
 
-// --- FTP UPLOAD & DOWNLOAD FUNCTIONS --- 
-
-void UFTPManager::CancelTransfer(FFTPTransferHandle Handle)
+void UServerHelper::CancelTransfer(FNetworkTransferHandle Handle)
 {
     Handle.Cancel();
 }
 
-FFTPTransferHandle UFTPManager::UploadFile(FString URL, FString User, FString Password, FString LocalFilePath, FOnFTPProgress OnProgress, FOnFTPComplete OnComplete)
+FNetworkTransferHandle UServerHelper::UploadFileFTP(FString URL, FString User, FString Password, FString LocalFilePath, FOnTransferProgress OnProgress, FOnTransferComplete OnComplete)
 {
-    FFTPTransferHandle Handle;
+    FNetworkTransferHandle Handle;
     TSharedPtr<std::atomic<bool>, ESPMode::ThreadSafe> CancelFlag = Handle.CancelFlag;
 
     Async(EAsyncExecution::Thread, [URL, User, Password, LocalFilePath, OnProgress, OnComplete, CancelFlag]()
+    {
+        bool bSuccess = false;
+
+#if PLATFORM_WINDOWS
+        if (FPaths::FileExists(LocalFilePath))
         {
-            bool bSuccess = false;
+            FString RawFileName = FPaths::GetCleanFilename(LocalFilePath);
+            FString EncodedFileName = FGenericPlatformHttp::UrlEncode(RawFileName);
 
-            if (FPaths::FileExists(LocalFilePath))
+            FString FinalURL = URL;
+            if (!FinalURL.EndsWith("/")) FinalURL += "/";
+            FinalURL += EncodedFileName;
+
+            FCurlEasyHandle CurlPtr;
+            if (CurlPtr.IsValid())
             {
-                FString RawFileName = FPaths::GetCleanFilename(LocalFilePath);
-                FString EncodedFileName = FGenericPlatformHttp::UrlEncode(RawFileName);
-
-                FString FinalURL = URL;
-                if (!FinalURL.EndsWith("/")) FinalURL += "/";
-                FinalURL += EncodedFileName;
-
-                CURL* Curl = curl_easy_init();
-                if (Curl)
+                TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*LocalFilePath));
+                if (Reader)
                 {
-                    TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*LocalFilePath));
-                    if (Reader)
-                    {
-                        FCurlContext Context;
-                        Context.FileArchive = Reader.Get();
-                        Context.CancelFlag = CancelFlag;
-                        Context.ProgressDelegate = OnProgress;
-                        Context.bIsUpload = true; 
+                    FCurlContext Context;
+                    Context.FileArchive = Reader.Get();
+                    Context.CancelFlag = CancelFlag;
+                    Context.ProgressDelegate = OnProgress;
+                    Context.bIsUpload = true;
 
-                        SetupCurlOptions(Curl, FinalURL, User, Password, &Context);
+                    SetupCurlOptions(CurlPtr.Get(), FinalURL, User, Password, &Context);
 
-                        curl_easy_setopt(Curl, CURLOPT_UPLOAD, 1L);
-                        curl_easy_setopt(Curl, CURLOPT_READFUNCTION, ReadCallback);
-                        curl_easy_setopt(Curl, CURLOPT_READDATA, &Context);
-                        curl_easy_setopt(Curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)Reader->TotalSize());
+                    curl_easy_setopt(CurlPtr.Get(), CURLOPT_UPLOAD, 1L);
+                    curl_easy_setopt(CurlPtr.Get(), CURLOPT_READFUNCTION, ReadCallback);
+                    curl_easy_setopt(CurlPtr.Get(), CURLOPT_READDATA, &Context);
+                    curl_easy_setopt(CurlPtr.Get(), CURLOPT_INFILESIZE_LARGE, (curl_off_t)Reader->TotalSize());
 
-                        CURLcode Res = curl_easy_perform(Curl);
+                    CURLcode Res = curl_easy_perform(CurlPtr.Get());
 
-                        if (Res == CURLE_OK) bSuccess = true;
-                        else UE_LOG(LogTemp, Error, TEXT("FTP Upload Error: %hs"), curl_easy_strerror(Res));
+                    if (Res == CURLE_OK) bSuccess = true;
+                    else UE_LOG(LogTemp, Error, TEXT("FTP Upload Error: %hs"), curl_easy_strerror(Res));
 
-                        Reader->Close();
-                    }
-                    curl_easy_cleanup(Curl);
+                    Reader->Close();
                 }
             }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("FTP: Local File Missing: %s"), *LocalFilePath);
-            }
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("FTP: Local File Missing: %s"), *LocalFilePath);
+        }
+#else
+        UE_LOG(LogTemp, Error, TEXT("FTP operations are currently only fully supported on Windows."));
+#endif
 
-            Async(EAsyncExecution::TaskGraph, [OnComplete, bSuccess]() { OnComplete.ExecuteIfBound(bSuccess); });
-        });
+        AsyncTask(ENamedThreads::GameThread, [OnComplete, bSuccess]() { OnComplete.ExecuteIfBound(bSuccess); });
+    });
 
     return Handle;
 }
 
-FFTPTransferHandle UFTPManager::DownloadFile(FString URL, FString User, FString Password, FString SaveDirectory, FOnFTPProgress OnProgress, FOnFTPComplete OnComplete)
+FNetworkTransferHandle UServerHelper::DownloadFileFTP(FString URL, FString User, FString Password, FString SaveDirectory, FOnTransferProgress OnProgress, FOnTransferComplete OnComplete)
 {
-    FFTPTransferHandle Handle;
+    FNetworkTransferHandle Handle;
     TSharedPtr<std::atomic<bool>, ESPMode::ThreadSafe> CancelFlag = Handle.CancelFlag;
 
     Async(EAsyncExecution::Thread, [URL, User, Password, SaveDirectory, OnProgress, OnComplete, CancelFlag]()
+    {
+        bool bSuccess = false;
+
+#if PLATFORM_WINDOWS
+        FCurlEasyHandle CurlPtr;
+        if (CurlPtr.IsValid())
         {
-            bool bSuccess = false;
-            CURL* Curl = curl_easy_init();
+            FString FileName = FPaths::GetCleanFilename(URL);
+            FileName = FGenericPlatformHttp::UrlDecode(FileName);
+            FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
 
-            if (Curl)
+            IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+            if (!PlatformFile.DirectoryExists(*SaveDirectory))
             {
-                FString FileName = FPaths::GetCleanFilename(URL);
-
-                FileName = FGenericPlatformHttp::UrlDecode(FileName);
-
-                FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
-
-                IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-                if (!PlatformFile.DirectoryExists(*SaveDirectory))
-                {
-                    PlatformFile.CreateDirectoryTree(*SaveDirectory);
-                }
-
-                TUniquePtr<FArchive> Writer(IFileManager::Get().CreateFileWriter(*FullSavePath));
-                if (Writer)
-                {
-                    FCurlContext Context;
-                    Context.FileArchive = Writer.Get();
-                    Context.CancelFlag = CancelFlag;
-                    Context.ProgressDelegate = OnProgress;
-                    Context.bIsUpload = false; 
-
-                    SetupCurlOptions(Curl, URL, User, Password, &Context);
-
-                    curl_easy_setopt(Curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-                    curl_easy_setopt(Curl, CURLOPT_WRITEDATA, &Context);
-
-                    CURLcode Res = curl_easy_perform(Curl);
-
-                    if (Res == CURLE_OK)
-                    {
-                        bSuccess = true;
-                    }
-                    else
-                    {
-                        UE_LOG(LogTemp, Warning, TEXT("FTP Download Failed: %hs"), curl_easy_strerror(Res));
-                    }
-
-                    Writer->Close();
-
-
-                    if (!bSuccess || (CancelFlag.IsValid() && CancelFlag->load()))
-                    {
-                        UE_LOG(LogTemp, Log, TEXT("FTP: Cleaning up partial file %s"), *FullSavePath);
-                        PlatformFile.DeleteFile(*FullSavePath);
-                        bSuccess = false; 
-                    }
-                }
-                curl_easy_cleanup(Curl);
+                PlatformFile.CreateDirectoryTree(*SaveDirectory);
             }
 
-            Async(EAsyncExecution::TaskGraph, [OnComplete, bSuccess]() { OnComplete.ExecuteIfBound(bSuccess); });
-        });
+            TUniquePtr<FArchive> Writer(IFileManager::Get().CreateFileWriter(*FullSavePath));
+            if (Writer)
+            {
+                FCurlContext Context;
+                Context.FileArchive = Writer.Get();
+                Context.CancelFlag = CancelFlag;
+                Context.ProgressDelegate = OnProgress;
+                Context.bIsUpload = false;
+
+                SetupCurlOptions(CurlPtr.Get(), URL, User, Password, &Context);
+
+                curl_easy_setopt(CurlPtr.Get(), CURLOPT_WRITEFUNCTION, WriteCallback);
+                curl_easy_setopt(CurlPtr.Get(), CURLOPT_WRITEDATA, &Context);
+
+                CURLcode Res = curl_easy_perform(CurlPtr.Get());
+
+                if (Res == CURLE_OK)
+                {
+                    bSuccess = true;
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("FTP Download Failed: %hs"), curl_easy_strerror(Res));
+                }
+
+                Writer->Close();
+
+                if (!bSuccess || (CancelFlag.IsValid() && CancelFlag->load()))
+                {
+                    UE_LOG(LogTemp, Log, TEXT("FTP: Cleaning up partial file %s"), *FullSavePath);
+                    PlatformFile.DeleteFile(*FullSavePath);
+                    bSuccess = false;
+                }
+            }
+        }
+#else
+        UE_LOG(LogTemp, Error, TEXT("FTP operations are currently only fully supported on Windows."));
+#endif
+
+        AsyncTask(ENamedThreads::GameThread, [OnComplete, bSuccess]() { OnComplete.ExecuteIfBound(bSuccess); });
+    });
 
     return Handle;
 }
 
-// --- HTTPS SERVER OPERATIONS --- 
+FNetworkTransferHandle UServerHelper::DownloadFileHTTP(FString URL, FString SaveDirectory, FOnTransferProgress OnProgress, FOnTransferComplete OnComplete)
+{
+    FNetworkTransferHandle Handle;
+    TSharedPtr<std::atomic<bool>, ESPMode::ThreadSafe> CancelFlag = Handle.CancelFlag;
 
-//SOON
+    FString FileName = FPaths::GetCleanFilename(URL);
+    int32 QueryParamIndex;
+    if (FileName.FindChar('?', QueryParamIndex))
+    {
+        FileName = FileName.Left(QueryParamIndex);
+    }
+    FileName = FGenericPlatformHttp::UrlDecode(FileName);
+    FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
+
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    if (!PlatformFile.DirectoryExists(*SaveDirectory))
+    {
+        PlatformFile.CreateDirectoryTree(*SaveDirectory);
+    }
+
+    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+    Request->SetURL(URL);
+    Request->SetVerb("GET");
+
+    Request->OnRequestProgress64().BindLambda(
+        [OnProgress, CancelFlag](FHttpRequestPtr HttpRequest, uint64 BytesSent, uint64 BytesReceived)
+    {
+        if (CancelFlag.IsValid() && CancelFlag->load())
+        {
+            HttpRequest->CancelRequest();
+            return;
+        }
+
+        if (HttpRequest->GetResponse().IsValid())
+        {
+            int32 TotalLength = HttpRequest->GetResponse()->GetContentLength();
+            if (TotalLength > 0)
+            {
+                float Percent = (float)BytesReceived / (float)TotalLength;
+                OnProgress.ExecuteIfBound(Percent);
+            }
+        }
+    });
+
+    Request->OnProcessRequestComplete().BindLambda(
+        [FullSavePath, OnComplete, CancelFlag](FHttpRequestPtr HttpRequest, FHttpResponsePtr Response, bool bWasSuccessful)
+    {
+        bool bSuccess = false;
+
+        if (CancelFlag.IsValid() && CancelFlag->load())
+        {
+        }
+        else if (bWasSuccessful && Response.IsValid() && EHttpResponseCodes::IsOk(Response->GetResponseCode()))
+        {
+            TArray<uint8> ResponseData = Response->GetContent();
+            if (FFileHelper::SaveArrayToFile(ResponseData, *FullSavePath))
+            {
+                bSuccess = true;
+            }
+        }
+
+        OnComplete.ExecuteIfBound(bSuccess);
+    });
+
+    Request->ProcessRequest();
+
+    return Handle;
+}
+
+FNetworkTransferHandle UServerHelper::DownloadAdvanced(FString URL, FString SaveDirectory, FString FileNameOverride, bool bOverwrite, bool bDeletePartialOnFail, FOnTransferBytes OnProgress, FOnTransferResult OnComplete)
+{
+    FNetworkTransferHandle Handle;
+    TSharedPtr<std::atomic<bool>, ESPMode::ThreadSafe> CancelFlag = Handle.CancelFlag;
+
+    FNetworkTransferResult EarlyResult;
+    if (URL.TrimStartAndEnd().IsEmpty())
+    {
+        EarlyResult.ErrorMessage = TEXT("URL is empty.");
+        OnComplete.ExecuteIfBound(EarlyResult);
+        return Handle;
+    }
+
+    if (SaveDirectory.TrimStartAndEnd().IsEmpty())
+    {
+        EarlyResult.ErrorMessage = TEXT("Save directory is empty.");
+        OnComplete.ExecuteIfBound(EarlyResult);
+        return Handle;
+    }
+
+    FString FileName = FileNameOverride.TrimStartAndEnd();
+    if (FileName.IsEmpty())
+    {
+        FileName = FPaths::GetCleanFilename(URL);
+        int32 QueryIndex = INDEX_NONE;
+        if (FileName.FindChar(TEXT('?'), QueryIndex))
+        {
+            FileName = FileName.Left(QueryIndex);
+        }
+        FileName = FGenericPlatformHttp::UrlDecode(FileName);
+    }
+
+    FileName = FPaths::GetCleanFilename(FileName);
+    if (FileName.IsEmpty())
+    {
+        EarlyResult.ErrorMessage = TEXT("Could not resolve a valid output filename.");
+        OnComplete.ExecuteIfBound(EarlyResult);
+        return Handle;
+    }
+
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    if (!PlatformFile.DirectoryExists(*SaveDirectory))
+    {
+        PlatformFile.CreateDirectoryTree(*SaveDirectory);
+    }
+
+    const FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
+    if (PlatformFile.FileExists(*FullSavePath) && !bOverwrite)
+    {
+        EarlyResult.SavedFilePath = FullSavePath;
+        EarlyResult.ErrorMessage = TEXT("Destination file already exists.");
+        OnComplete.ExecuteIfBound(EarlyResult);
+        return Handle;
+    }
+
+    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+    Request->SetURL(URL);
+    Request->SetVerb(TEXT("GET"));
+
+    Request->OnRequestProgress64().BindLambda(
+        [OnProgress, CancelFlag](FHttpRequestPtr HttpRequest, uint64 BytesSent, uint64 BytesReceived)
+        {
+            if (CancelFlag.IsValid() && CancelFlag->load())
+            {
+                HttpRequest->CancelRequest();
+                return;
+            }
+
+            int64 TotalBytes = 0;
+            if (HttpRequest->GetResponse().IsValid())
+            {
+                TotalBytes = HttpRequest->GetResponse()->GetContentLength();
+            }
+            OnProgress.ExecuteIfBound(static_cast<int64>(BytesReceived), TotalBytes);
+        });
+
+    Request->OnProcessRequestComplete().BindLambda(
+        [FullSavePath, bDeletePartialOnFail, OnComplete, CancelFlag](FHttpRequestPtr HttpRequest, FHttpResponsePtr Response, bool bWasSuccessful)
+        {
+            FNetworkTransferResult Result;
+            Result.SavedFilePath = FullSavePath;
+
+            if (CancelFlag.IsValid() && CancelFlag->load())
+            {
+                Result.ErrorMessage = TEXT("Transfer was canceled.");
+            }
+            else if (!bWasSuccessful || !Response.IsValid())
+            {
+                Result.ErrorMessage = TEXT("HTTP request failed.");
+            }
+            else
+            {
+                Result.StatusCode = Response->GetResponseCode();
+                Result.TotalBytes = Response->GetContentLength();
+                if (EHttpResponseCodes::IsOk(Result.StatusCode))
+                {
+                    const TArray<uint8>& Data = Response->GetContent();
+                    Result.BytesTransferred = Data.Num();
+                    Result.SHA1 = FSHA1::HashBuffer(Data.GetData(), Data.Num()).ToString();
+                    if (FFileHelper::SaveArrayToFile(Data, *FullSavePath))
+                    {
+                        Result.bSuccess = true;
+                    }
+                    else
+                    {
+                        Result.ErrorMessage = TEXT("Failed to save downloaded file.");
+                    }
+                }
+                else
+                {
+                    Result.ErrorMessage = FString::Printf(TEXT("HTTP status code %d."), Result.StatusCode);
+                }
+            }
+
+            if (!Result.bSuccess && bDeletePartialOnFail)
+            {
+                FPlatformFileManager::Get().GetPlatformFile().DeleteFile(*FullSavePath);
+            }
+
+            OnComplete.ExecuteIfBound(Result);
+        });
+
+    Request->ProcessRequest();
+    return Handle;
+}
+
+

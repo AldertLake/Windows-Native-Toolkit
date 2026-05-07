@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #pragma once
 
@@ -15,3 +15,4 @@ public:
 	virtual void ShutdownModule() override;
 	static void ShowRatingDialogIfNeeded();
 };
+

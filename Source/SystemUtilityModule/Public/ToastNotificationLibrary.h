@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #pragma once
 
@@ -10,6 +10,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "ToastNotificationLibrary.generated.h"
 
+/** Icon styles supported by the native Windows notification helper. */
 UENUM(BlueprintType)
 enum class EToastIconType : uint8
 {
@@ -19,6 +20,7 @@ enum class EToastIconType : uint8
     None        UMETA(DisplayName = "No Icon")
 };
 
+/** Native Windows tray-notification helper nodes for Blueprints. */
 UCLASS()
 class SYSTEMUTILITYMODULE_API UToastNotificationLibrary : public UBlueprintFunctionLibrary
 {
@@ -26,14 +28,10 @@ class SYSTEMUTILITYMODULE_API UToastNotificationLibrary : public UBlueprintFunct
 
 public:
 
-    //This function will push notification with custom title & descreption & icon.
-    //Note that the process name & icon of this notification follow the packaged game settings.
-    //This can crash your editor if you abuse it alot in editor but 100% Safe in packaged game.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|Notifications", meta = (DisplayName = "Push System Notification"))
+    /** Shows a native Windows tray notification using the game window icon when available. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|Notifications", meta = (DisplayName = "Show Notification"))
     static void ShowToastNotification(const FString& Title, const FString& Message, EToastIconType IconType);
 
-    //This function is used to clear the tray icon created by ShowToastNotification.
-    //Note : This function is old & you should not use it. starting from 2.2 the tray management is automated !
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management|Notifications", meta = (DeprecatedFunction, DeprecationMessage = "Tray is managed automaticaly & this function is Deprecated !"))
     static void CleanupTrayIcon();
 };
+

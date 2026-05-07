@@ -1,14 +1,16 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #include "NetworkUtilities.h"
 
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
+#include "Async/Async.h"
+#include "WindowsNativeToolkitSettings.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -18,35 +20,125 @@
 #include <wininet.h>
 #include <wlanapi.h>
 #include <objbase.h>
+#include <netlistmgr.h>
+#include <icmpapi.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
-//Static BS Used For Public IP Query... Note that each index is tied with element
-//In the EPublicIPProvider Enumeration.
-static const TArray<FString> PROVIDER_URLS = {
-    TEXT("https://ifconfig.me/ip"),        
-    TEXT("https://checkip.amazonaws.com"),
-    TEXT("https://icanhazip.com/")          
-};
+#if PLATFORM_WINDOWS
+namespace
+{
+struct FScopedComInit
+{
+    HRESULT Result = E_FAIL;
+    bool bNeedsUninitialize = false;
 
-// --- INTERNET SUPPORT OR CONNECTION ---
+    FScopedComInit()
+    {
+        Result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        bNeedsUninitialize = SUCCEEDED(Result);
+    }
+
+    ~FScopedComInit()
+    {
+        if (bNeedsUninitialize)
+        {
+            CoUninitialize();
+        }
+    }
+
+    bool IsUsable() const
+    {
+        return SUCCEEDED(Result) || Result == RPC_E_CHANGED_MODE;
+    }
+};
+}
+#endif
+
+namespace
+{
+    static TArray<FString> GetPublicIPProviderUrls()
+    {
+        const UWindowsNativeToolkitSettings* Settings = GetDefault<UWindowsNativeToolkitSettings>();
+        TArray<FString> ProviderUrls;
+        ProviderUrls.Reserve(3);
+        ProviderUrls.Add(Settings ? Settings->IfConfigPublicIPURL.TrimStartAndEnd() : FString(TEXT("https://ifconfig.me/ip")));
+        ProviderUrls.Add(Settings ? Settings->AmazonPublicIPURL.TrimStartAndEnd() : FString(TEXT("https://checkip.amazonaws.com")));
+        ProviderUrls.Add(Settings ? Settings->ICanHazIPPublicIPURL.TrimStartAndEnd() : FString(TEXT("https://icanhazip.com/")));
+        return ProviderUrls;
+    }
+
+    static FString GetDefaultInternetAccessUrl()
+    {
+        const UWindowsNativeToolkitSettings* Settings = GetDefault<UWindowsNativeToolkitSettings>();
+        const FString Url = Settings ? Settings->DefaultInternetAccessURL.TrimStartAndEnd() : FString();
+        return Url.IsEmpty() ? FString(TEXT("http://clients3.google.com/generate_204")) : Url;
+    }
+
+    static float GetDefaultInternetAccessTimeoutSeconds()
+    {
+        const UWindowsNativeToolkitSettings* Settings = GetDefault<UWindowsNativeToolkitSettings>();
+        return (Settings && Settings->DefaultInternetAccessTimeoutSeconds > 0.1f) ? Settings->DefaultInternetAccessTimeoutSeconds : 2.0f;
+    }
+
+    static float GetDefaultPingTimeoutSeconds()
+    {
+        const UWindowsNativeToolkitSettings* Settings = GetDefault<UWindowsNativeToolkitSettings>();
+        return (Settings && Settings->DefaultPingTimeoutSeconds > 0.1f) ? Settings->DefaultPingTimeoutSeconds : 2.0f;
+    }
+
+    static float GetDefaultPublicIPTimeoutSeconds()
+    {
+        const UWindowsNativeToolkitSettings* Settings = GetDefault<UWindowsNativeToolkitSettings>();
+        return (Settings && Settings->DefaultPublicIPTimeoutSeconds > 0.1f) ? Settings->DefaultPublicIPTimeoutSeconds : 4.0f;
+    }
+}
 
 bool UNetworkUtilities::IsConnectedToInternet()
 {
-    DWORD flags;
-    return InternetGetConnectedState(&flags, 0);
+#if PLATFORM_WINDOWS
+    FScopedComInit ComInit;
+    bool bIsConnected = false;
+    HRESULT hr = S_OK;
+
+    INetworkListManager* pNetworkListManager = nullptr;
+    hr = CoCreateInstance(CLSID_NetworkListManager, nullptr, CLSCTX_ALL, IID_INetworkListManager, (LPVOID*)&pNetworkListManager);
+
+    if (SUCCEEDED(hr) && pNetworkListManager)
+    {
+        NLM_CONNECTIVITY connectivity;
+        hr = pNetworkListManager->GetConnectivity(&connectivity);
+        if (SUCCEEDED(hr))
+        {
+            if (connectivity & (NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET))
+            {
+                bIsConnected = true;
+            }
+        }
+        pNetworkListManager->Release();
+    }
+    else
+    {
+        DWORD flags;
+        bIsConnected = InternetGetConnectedState(&flags, 0);
+    }
+
+    return bIsConnected;
+#else
+    return false;
+#endif
 }
 
 void UNetworkUtilities::QueryInternetAccess(FString TargetURL, float Timeout, FOnInternetAccessResult OnResult)
 {
     if (TargetURL.IsEmpty())
     {
-        TargetURL = TEXT("http://clients3.google.com/generate_204");
+        TargetURL = GetDefaultInternetAccessUrl();
     }
 
     if (Timeout <= 0.1f)
     {
-        Timeout = 2.0f;
+        Timeout = GetDefaultInternetAccessTimeoutSeconds();
     }
 
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
@@ -56,7 +148,7 @@ void UNetworkUtilities::QueryInternetAccess(FString TargetURL, float Timeout, FO
     Request->SetTimeout(Timeout);
 
     Request->OnProcessRequestComplete().BindLambda(
-        [OnResult](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+        [OnResult](FHttpRequestPtr HttpRequest, FHttpResponsePtr Response, bool bWasSuccessful)
         {
             bool bRealConnection = false;
 
@@ -79,29 +171,21 @@ ENetworkWindowsType UNetworkUtilities::GetConnectionType()
 {
 #if PLATFORM_WINDOWS
     ULONG OutBufLen = 15000;
-    PIP_ADAPTER_ADDRESSES pAddresses = nullptr;
-    DWORD dwRetVal = 0;
+    TArray<uint8> Buffer;
+    Buffer.SetNumUninitialized(OutBufLen);
+    PIP_ADAPTER_ADDRESSES pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
 
-    pAddresses = (PIP_ADAPTER_ADDRESSES)FMemory::Malloc(OutBufLen);
-    if (pAddresses == nullptr)
-    {
-        return ENetworkWindowsType::None;
-    }
-
-    dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, pAddresses, &OutBufLen);
+    DWORD dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, pAddresses, &OutBufLen);
 
     if (dwRetVal == ERROR_BUFFER_OVERFLOW)
     {
-        FMemory::Free(pAddresses);
-        pAddresses = (PIP_ADAPTER_ADDRESSES)FMemory::Malloc(OutBufLen);
-        if (pAddresses == nullptr) return ENetworkWindowsType::None;
-
+        Buffer.SetNumUninitialized(OutBufLen);
+        pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
         dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, pAddresses, &OutBufLen);
     }
 
     if (dwRetVal != NO_ERROR)
     {
-        FMemory::Free(pAddresses);
         return ENetworkWindowsType::None;
     }
 
@@ -111,24 +195,19 @@ ENetworkWindowsType UNetworkUtilities::GetConnectionType()
     PIP_ADAPTER_ADDRESSES pCurrAddresses = pAddresses;
     while (pCurrAddresses)
     {
-        if (pCurrAddresses->OperStatus == IfOperStatusUp)
+        if (pCurrAddresses->OperStatus == IfOperStatusUp && pCurrAddresses->FirstGatewayAddress != nullptr)
         {
-            if (pCurrAddresses->FirstGatewayAddress != nullptr)
+            if (pCurrAddresses->IfType == IF_TYPE_IEEE80211)
             {
-                if (pCurrAddresses->IfType == IF_TYPE_IEEE80211)
-                {
-                    bHasWifi = true;
-                }
-                else if (pCurrAddresses->IfType == IF_TYPE_ETHERNET_CSMACD)
-                {
-                    bHasEthernet = true;
-                }
+                bHasWifi = true;
+            }
+            else if (pCurrAddresses->IfType == IF_TYPE_ETHERNET_CSMACD)
+            {
+                bHasEthernet = true;
             }
         }
         pCurrAddresses = pCurrAddresses->Next;
     }
-
-    FMemory::Free(pAddresses);
 
     if (bHasEthernet && bHasWifi) return ENetworkWindowsType::Both;
     if (bHasEthernet) return ENetworkWindowsType::Ethernet;
@@ -140,164 +219,94 @@ ENetworkWindowsType UNetworkUtilities::GetConnectionType()
 #endif
 }
 
-// --- PUBLIC IP ADRESS HANDLING ---
-
-void UNetworkUtilities::GetPublicIPAddress(EPublicIPProvider Mode, float Timeout, FOnPublicIPFound OnResult)
+void UNetworkUtilities::PingAddress(FString Address, float Timeout, FOnPingResult OnResult)
 {
-    if (Timeout <= 0.1f) Timeout = 4.0f;
-
-    int32 StartIndex = 0;
-    bool bIsAuto = false;
-
-    switch (Mode)
+#if PLATFORM_WINDOWS
+    if (Timeout <= 0.1f)
     {
-    case EPublicIPProvider::Auto:
-        StartIndex = 0;
-        bIsAuto = true;
-        break;
-    case EPublicIPProvider::IfConfig:
-        StartIndex = 0;
-        break;
-    case EPublicIPProvider::Amazon:
-        StartIndex = 1;
-        break;
-    case EPublicIPProvider::ICanHazIP:
-        StartIndex = 2;
-        break;
-    default:
-        StartIndex = 0;
-        bIsAuto = true;
-        break;
+        Timeout = GetDefaultPingTimeoutSeconds();
     }
 
-    ProcessIPRequest(StartIndex, bIsAuto, Timeout, OnResult);
-}
-
-void UNetworkUtilities::ProcessIPRequest(int32 Index, bool bIsAutoMode, float Timeout, FOnPublicIPFound Callback)
-{
-    if (!PROVIDER_URLS.IsValidIndex(Index))
+    Async(EAsyncExecution::Thread, [Address, Timeout, OnResult]()
     {
-        Callback.ExecuteIfBound(TEXT("Error: All providers failed"));
-        return;
-    }
+        bool bSuccess = false;
+        int32 PingMs = -1;
 
-    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-
-    Request->SetURL(PROVIDER_URLS[Index]);
-    Request->SetVerb("GET");
-    Request->SetTimeout(Timeout);
-
-    Request->OnProcessRequestComplete().BindLambda(
-        [Index, bIsAutoMode, Timeout, Callback](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+        HANDLE hIcmpFile = IcmpCreateFile();
+        if (hIcmpFile != INVALID_HANDLE_VALUE)
         {
+            ADDRINFOA hints = {};
+            PADDRINFOA res = nullptr;
+            hints.ai_family = AF_INET;
 
-            if (bWasSuccessful && Response.IsValid() && EHttpResponseCodes::IsOk(Response->GetResponseCode()))
+            if (GetAddrInfoA(TCHAR_TO_ANSI(*Address), nullptr, &hints, &res) == 0 && res != nullptr)
             {
-                FString ResultIP = Response->GetContentAsString();
+                sockaddr_in* ipv4 = (sockaddr_in*)res->ai_addr;
+                IPAddr destIp = ipv4->sin_addr.S_un.S_addr;
+                FreeAddrInfoA(res);
 
-                ResultIP = ResultIP.Replace(TEXT("\n"), TEXT("")).Replace(TEXT("\r"), TEXT(""));
-                ResultIP.TrimStartAndEndInline();
+                char SendData[32] = "Ping Buffer Data for Testing";
+                DWORD ReplySize = sizeof(ICMP_ECHO_REPLY) + sizeof(SendData) + 8;
+                TArray<uint8> ReplyBuffer;
+                ReplyBuffer.SetNumZeroed(ReplySize);
 
-                if (ResultIP.Len() >= 7 && ResultIP.Len() <= 45)
+                DWORD dwRetVal = IcmpSendEcho(hIcmpFile, destIp, SendData, sizeof(SendData),
+                    nullptr, ReplyBuffer.GetData(), ReplySize, FMath::Max(100.0f, Timeout * 1000.0f));
+
+                if (dwRetVal != 0)
                 {
-                    Callback.ExecuteIfBound(ResultIP);
-                    return;
+                    PICMP_ECHO_REPLY pEchoReply = (PICMP_ECHO_REPLY)ReplyBuffer.GetData();
+                    if (pEchoReply->Status == IP_SUCCESS)
+                    {
+                        bSuccess = true;
+                        PingMs = pEchoReply->RoundTripTime;
+                    }
                 }
             }
+            IcmpCloseHandle(hIcmpFile);
+        }
 
-            if (bIsAutoMode)
-            {
-
-                ProcessIPRequest(Index + 1, true, Timeout, Callback);
-            }
-            else
-            {
-                Callback.ExecuteIfBound(TEXT("Error: Provider Unreachable"));
-            }
+        AsyncTask(ENamedThreads::GameThread, [bSuccess, PingMs, OnResult]()
+        {
+            OnResult.ExecuteIfBound(bSuccess, PingMs);
         });
-
-    Request->ProcessRequest();
+    });
+#else
+    AsyncTask(ENamedThreads::GameThread, [OnResult]() { OnResult.ExecuteIfBound(false, -1); });
+#endif
 }
 
-// --- Deprecated Functions --- Never Use Them Or Replace Them As Soon As Possible.
-
-FString UNetworkUtilities::GetLocalIpAddress()
+void UNetworkUtilities::ResolveDomain(FString Hostname, FOnDNSResult OnResult)
 {
-    ULONG bufferSize = 0;
-    PIP_ADAPTER_ADDRESSES adapters = nullptr;
-
-    GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, nullptr, &bufferSize);
-    if (bufferSize == 0) return FString();
-
-    adapters = (PIP_ADAPTER_ADDRESSES)HeapAlloc(GetProcessHeap(), 0, bufferSize);
-    if (!adapters) return FString();
-
-    DWORD result = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, adapters, &bufferSize);
-    if (result != NO_ERROR)
+#if PLATFORM_WINDOWS
+    Async(EAsyncExecution::Thread, [Hostname, OnResult]()
     {
-        HeapFree(GetProcessHeap(), 0, adapters);
-        return FString();
-    }
+        bool bSuccess = false;
+        FString ResolvedIP = TEXT("");
 
-    FString ipAddress;
-    for (PIP_ADAPTER_ADDRESSES adapter = adapters; adapter != nullptr; adapter = adapter->Next)
-    {
-        if (adapter->OperStatus == IfOperStatusUp && adapter->FirstGatewayAddress)
+        ADDRINFOA hints = {};
+        PADDRINFOA res = nullptr;
+        hints.ai_family = AF_INET;
+
+        if (GetAddrInfoA(TCHAR_TO_ANSI(*Hostname), nullptr, &hints, &res) == 0 && res != nullptr)
         {
-            PIP_ADAPTER_UNICAST_ADDRESS unicast = adapter->FirstUnicastAddress;
-            if (unicast && unicast->Address.lpSockaddr->sa_family == AF_INET)
-            {
-                sockaddr_in* addr = (sockaddr_in*)unicast->Address.lpSockaddr;
-                char ipStr[INET_ADDRSTRLEN];
-                inet_ntop(AF_INET, &(addr->sin_addr), ipStr, INET_ADDRSTRLEN);
-                ipAddress = FString(UTF8_TO_TCHAR(ipStr));
-                break;
-            }
+            sockaddr_in* ipv4 = (sockaddr_in*)res->ai_addr;
+            char ipStr[INET_ADDRSTRLEN];
+            InetNtopA(AF_INET, &(ipv4->sin_addr), ipStr, INET_ADDRSTRLEN);
+            ResolvedIP = FString(UTF8_TO_TCHAR(ipStr));
+            bSuccess = true;
+            FreeAddrInfoA(res);
         }
-    }
 
-    HeapFree(GetProcessHeap(), 0, adapters);
-    return ipAddress;
-}
-
-FString UNetworkUtilities::GetActiveNetworkCard()
-{
-    ULONG bufferSize = 0;
-    PIP_ADAPTER_ADDRESSES adapters = nullptr;
-
-    GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, nullptr, &bufferSize);
-    if (bufferSize == 0) return FString();
-
-    adapters = (PIP_ADAPTER_ADDRESSES)HeapAlloc(GetProcessHeap(), 0, bufferSize);
-    if (!adapters) return FString();
-
-    DWORD result = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, adapters, &bufferSize);
-    if (result != NO_ERROR)
-    {
-        HeapFree(GetProcessHeap(), 0, adapters);
-        return FString();
-    }
-
-    FString networkCardName;
-    for (PIP_ADAPTER_ADDRESSES adapter = adapters; adapter != nullptr; adapter = adapter->Next)
-    {
-        if (adapter->OperStatus == IfOperStatusUp && adapter->FirstGatewayAddress)
+        AsyncTask(ENamedThreads::GameThread, [bSuccess, ResolvedIP, OnResult]()
         {
-            if (adapter->Description)
-            {
-                networkCardName = FString(adapter->Description);
-                break; // Use the first active adapter with a gateway
-                // if you have ethernet and wifi and wanna test,
-                // there is a way to change active adapter i dont clearly remember it in windwos, somthing like metric value or idk..
-            }
-        }
-    }
-
-    HeapFree(GetProcessHeap(), 0, adapters);
-    return networkCardName.IsEmpty() ? FString() : networkCardName;
+            OnResult.ExecuteIfBound(bSuccess, ResolvedIP);
+        });
+    });
+#else
+    AsyncTask(ENamedThreads::GameThread, [OnResult]() { OnResult.ExecuteIfBound(false, TEXT("")); });
+#endif
 }
-
-// --- NETWORK INTERFACE PROPERTIES ---
 
 TArray<FNetworkInterfaceInfo> UNetworkUtilities::GetAvailableInterfaces()
 {
@@ -305,19 +314,16 @@ TArray<FNetworkInterfaceInfo> UNetworkUtilities::GetAvailableInterfaces()
 
 #if PLATFORM_WINDOWS
     ULONG OutBufLen = 15000;
-    PIP_ADAPTER_ADDRESSES pAddresses = nullptr;
-
-
-    pAddresses = (PIP_ADAPTER_ADDRESSES)FMemory::Malloc(OutBufLen);
-    if (pAddresses == nullptr) return ResultArray;
+    TArray<uint8> Buffer;
+    Buffer.SetNumUninitialized(OutBufLen);
+    PIP_ADAPTER_ADDRESSES pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
 
     DWORD dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, pAddresses, &OutBufLen);
 
     if (dwRetVal == ERROR_BUFFER_OVERFLOW)
     {
-        FMemory::Free(pAddresses);
-        pAddresses = (PIP_ADAPTER_ADDRESSES)FMemory::Malloc(OutBufLen);
-        if (pAddresses == nullptr) return ResultArray;
+        Buffer.SetNumUninitialized(OutBufLen);
+        pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
         dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, pAddresses, &OutBufLen);
     }
 
@@ -326,7 +332,6 @@ TArray<FNetworkInterfaceInfo> UNetworkUtilities::GetAvailableInterfaces()
         PIP_ADAPTER_ADDRESSES pCurrAddresses = pAddresses;
         while (pCurrAddresses)
         {
-
             if (pCurrAddresses->OperStatus == IfOperStatusUp)
             {
                 ENetworkWindowsType FoundType = ENetworkWindowsType::None;
@@ -366,8 +371,6 @@ TArray<FNetworkInterfaceInfo> UNetworkUtilities::GetAvailableInterfaces()
             pCurrAddresses = pCurrAddresses->Next;
         }
     }
-
-    FMemory::Free(pAddresses);
 #endif
 
     return ResultArray;
@@ -375,6 +378,15 @@ TArray<FNetworkInterfaceInfo> UNetworkUtilities::GetAvailableInterfaces()
 
 FString UNetworkUtilities::GetWifiNetworkName(FString InterfaceID)
 {
+    FWiFiNetworkInfo Info = GetDetailedWiFiInfo(InterfaceID);
+    return Info.SSID.IsEmpty() ? TEXT("None") : Info.SSID;
+}
+
+FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
+{
+    FWiFiNetworkInfo Info;
+    Info.SSID = TEXT("None");
+
 #if PLATFORM_WINDOWS
     HANDLE hClient = NULL;
     DWORD dwMaxClient = 2;
@@ -382,103 +394,110 @@ FString UNetworkUtilities::GetWifiNetworkName(FString InterfaceID)
     DWORD dwResult = 0;
     PWLAN_INTERFACE_INFO_LIST pIfList = NULL;
     PWLAN_CONNECTION_ATTRIBUTES pConnectInfo = NULL;
-    FString FoundSSID = TEXT("None");
 
     dwResult = WlanOpenHandle(dwMaxClient, NULL, &dwCurVersion, &hClient);
-    if (dwResult != ERROR_SUCCESS) return TEXT("Error: WlanOpenHandle Failed");
-
-    dwResult = WlanEnumInterfaces(hClient, NULL, &pIfList);
     if (dwResult != ERROR_SUCCESS)
     {
-        WlanCloseHandle(hClient, NULL);
-        return TEXT("Error: EnumInterfaces Failed");
+        Info.ErrorMessage = TEXT("WlanOpenHandle failed.");
+        return Info;
     }
 
-    for (int i = 0; i < (int)pIfList->dwNumberOfItems; i++)
+    dwResult = WlanEnumInterfaces(hClient, NULL, &pIfList);
+    if (dwResult == ERROR_SUCCESS && pIfList != NULL)
     {
-        PWLAN_INTERFACE_INFO pIfInfo = &pIfList->InterfaceInfo[i];
-
-        OLECHAR* GuidString;
-        if (StringFromCLSID(pIfInfo->InterfaceGuid, &GuidString) == S_OK)
+        for (int i = 0; i < (int)pIfList->dwNumberOfItems; i++)
         {
-            FString ConvertedGUID = FString(GuidString);
-            ::CoTaskMemFree(GuidString); 
+            PWLAN_INTERFACE_INFO pIfInfo = &pIfList->InterfaceInfo[i];
 
-            if (ConvertedGUID.Equals(InterfaceID, ESearchCase::IgnoreCase))
+            OLECHAR* GuidString;
+            if (StringFromCLSID(pIfInfo->InterfaceGuid, &GuidString) == S_OK)
             {
-                DWORD connectSize = 0;
-                dwResult = WlanQueryInterface(
-                    hClient,
-                    &pIfInfo->InterfaceGuid,
-                    wlan_intf_opcode_current_connection,
-                    NULL,
-                    &connectSize,
-                    (PVOID*)&pConnectInfo,
-                    NULL
-                );
+                FString ConvertedGUID = FString(GuidString);
+                ::CoTaskMemFree(GuidString);
 
-                if (dwResult == ERROR_SUCCESS && pConnectInfo != NULL)
+                if (ConvertedGUID.Equals(InterfaceID, ESearchCase::IgnoreCase))
                 {
-                    if (pConnectInfo->isState == wlan_interface_state_connected)
-                    {
-                        DOT11_SSID ssid = pConnectInfo->wlanAssociationAttributes.dot11Ssid;
+                    DWORD connectSize = 0;
+                    dwResult = WlanQueryInterface(
+                        hClient,
+                        &pIfInfo->InterfaceGuid,
+                        wlan_intf_opcode_current_connection,
+                        NULL,
+                        &connectSize,
+                        (PVOID*)&pConnectInfo,
+                        NULL
+                    );
 
-                        if (ssid.uSSIDLength > 0)
+                    if (dwResult == ERROR_SUCCESS && pConnectInfo != NULL)
+                    {
+                        if (pConnectInfo->isState == wlan_interface_state_connected)
                         {
-                            char SSIDString[33]; 
-                            FMemory::Memcpy(SSIDString, ssid.ucSSID, ssid.uSSIDLength);
-                            SSIDString[ssid.uSSIDLength] = '\0'; 
+                            DOT11_SSID ssid = pConnectInfo->wlanAssociationAttributes.dot11Ssid;
 
-                            FoundSSID = FString(UTF8_TO_TCHAR(SSIDString));
+                            if (ssid.uSSIDLength > 0)
+                            {
+                                char SSIDString[33];
+                                FMemory::Memcpy(SSIDString, ssid.ucSSID, ssid.uSSIDLength);
+                                SSIDString[ssid.uSSIDLength] = '\0';
+                                Info.SSID = FString(UTF8_TO_TCHAR(SSIDString));
+                            }
+
+                            Info.SignalQuality = pConnectInfo->wlanAssociationAttributes.wlanSignalQuality;
+                            Info.bSuccess = true;
+
+                            uint8* mac = pConnectInfo->wlanAssociationAttributes.dot11Bssid;
+                            Info.BSSID = FString::Printf(TEXT("%02X:%02X:%02X:%02X:%02X:%02X"), mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+                            switch (pConnectInfo->wlanSecurityAttributes.dot11AuthAlgorithm)
+                            {
+                                case DOT11_AUTH_ALGO_80211_OPEN: Info.AuthAlgorithm = TEXT("Open"); break;
+                                case DOT11_AUTH_ALGO_80211_SHARED_KEY: Info.AuthAlgorithm = TEXT("Shared Key"); break;
+                                case DOT11_AUTH_ALGO_WPA: Info.AuthAlgorithm = TEXT("WPA"); break;
+                                case DOT11_AUTH_ALGO_WPA_PSK: Info.AuthAlgorithm = TEXT("WPA-PSK"); break;
+                                case DOT11_AUTH_ALGO_RSNA: Info.AuthAlgorithm = TEXT("WPA2"); break;
+                                case DOT11_AUTH_ALGO_RSNA_PSK: Info.AuthAlgorithm = TEXT("WPA2-PSK"); break;
+                                default: Info.AuthAlgorithm = TEXT("Unknown"); break;
+                            }
                         }
-                    }
-                    else
-                    {
-                        FoundSSID = TEXT("Disconnected");
-                    }
+                        else
+                        {
+                            Info.SSID = TEXT("Disconnected");
+                            Info.ErrorMessage = TEXT("Wi-Fi interface is disconnected.");
+                        }
 
-
-                    if (pConnectInfo)
-                    {
                         WlanFreeMemory(pConnectInfo);
                         pConnectInfo = NULL;
                     }
+                    break;
                 }
-                break; 
             }
         }
-    }
-
-    if (pIfList != NULL)
-    {
         WlanFreeMemory(pIfList);
     }
     WlanCloseHandle(hClient, NULL);
-
-    return FoundSSID;
-
-#else
-    return TEXT("None"); 
 #endif
+    if (!Info.bSuccess && Info.ErrorMessage.IsEmpty() && Info.SSID.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+    {
+        Info.ErrorMessage = TEXT("Wi-Fi information was not found.");
+    }
+
+    return Info;
 }
 
 FString UNetworkUtilities::GetLocalIpForInterface(FString InterfaceID)
 {
-
 #if PLATFORM_WINDOWS
     ULONG OutBufLen = 15000;
-    PIP_ADAPTER_ADDRESSES pAddresses = nullptr;
-
-    pAddresses = (PIP_ADAPTER_ADDRESSES)FMemory::Malloc(OutBufLen);
-    if (pAddresses == nullptr) return TEXT("");
+    TArray<uint8> Buffer;
+    Buffer.SetNumUninitialized(OutBufLen);
+    PIP_ADAPTER_ADDRESSES pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
 
     DWORD dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, pAddresses, &OutBufLen);
 
     if (dwRetVal == ERROR_BUFFER_OVERFLOW)
     {
-        FMemory::Free(pAddresses);
-        pAddresses = (PIP_ADAPTER_ADDRESSES)FMemory::Malloc(OutBufLen);
-        if (pAddresses == nullptr) return TEXT("");
+        Buffer.SetNumUninitialized(OutBufLen);
+        pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
         dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, pAddresses, &OutBufLen);
     }
 
@@ -502,7 +521,7 @@ FString UNetworkUtilities::GetLocalIpForInterface(FString InterfaceID)
                         {
                             sockaddr_in* pSockAddr = (sockaddr_in*)pUnicast->Address.lpSockaddr;
                             char ipStr[INET_ADDRSTRLEN];
-                            inet_ntop(AF_INET, &(pSockAddr->sin_addr), ipStr, INET_ADDRSTRLEN);
+                            InetNtopA(AF_INET, &(pSockAddr->sin_addr), ipStr, INET_ADDRSTRLEN);
                             FoundIP = FString(UTF8_TO_TCHAR(ipStr));
                             break;
                         }
@@ -514,10 +533,88 @@ FString UNetworkUtilities::GetLocalIpForInterface(FString InterfaceID)
             pCurrAddresses = pCurrAddresses->Next;
         }
     }
-
-    FMemory::Free(pAddresses);
     return FoundIP;
 #else
     return TEXT("");
 #endif
 }
+
+void UNetworkUtilities::GetPublicIP(EPublicIPProvider Mode, float Timeout, FOnPublicIPResult OnResult)
+{
+    if (Timeout <= 0.1f)
+    {
+        Timeout = GetDefaultPublicIPTimeoutSeconds();
+    }
+
+    int32 StartIndex = 0;
+    bool bIsAuto = false;
+
+    switch (Mode)
+    {
+    case EPublicIPProvider::Auto:
+        StartIndex = 0;
+        bIsAuto = true;
+        break;
+    case EPublicIPProvider::IfConfig:
+        StartIndex = 0;
+        break;
+    case EPublicIPProvider::Amazon:
+        StartIndex = 1;
+        break;
+    case EPublicIPProvider::ICanHazIP:
+        StartIndex = 2;
+        break;
+    default:
+        StartIndex = 0;
+        bIsAuto = true;
+        break;
+    }
+
+    ProcessIPRequest(StartIndex, bIsAuto, Timeout, OnResult);
+}
+
+void UNetworkUtilities::ProcessIPRequest(int32 Index, bool bIsAutoMode, float Timeout, FOnPublicIPResult Callback)
+{
+    const TArray<FString> ProviderUrls = GetPublicIPProviderUrls();
+    if (!ProviderUrls.IsValidIndex(Index))
+    {
+        Callback.ExecuteIfBound(false, TEXT(""), TEXT("All providers failed."));
+        return;
+    }
+
+    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+
+    Request->SetURL(ProviderUrls[Index]);
+    Request->SetVerb("GET");
+    Request->SetTimeout(Timeout);
+
+    Request->OnProcessRequestComplete().BindLambda(
+        [Index, bIsAutoMode, Timeout, Callback](FHttpRequestPtr HttpRequest, FHttpResponsePtr Response, bool bWasSuccessful)
+        {
+            if (bWasSuccessful && Response.IsValid() && EHttpResponseCodes::IsOk(Response->GetResponseCode()))
+            {
+                FString ResultIP = Response->GetContentAsString();
+                ResultIP = ResultIP.Replace(TEXT("\n"), TEXT("")).Replace(TEXT("\r"), TEXT(""));
+                ResultIP.TrimStartAndEndInline();
+
+                if (ResultIP.Len() >= 7 && ResultIP.Len() <= 45)
+                {
+                    Callback.ExecuteIfBound(true, ResultIP, TEXT(""));
+                    return;
+                }
+            }
+
+            if (bIsAutoMode)
+            {
+                ProcessIPRequest(Index + 1, true, Timeout, Callback);
+            }
+            else
+            {
+                Callback.ExecuteIfBound(false, TEXT(""), TEXT("Provider unreachable."));
+            }
+        });
+
+    Request->ProcessRequest();
+}
+
+

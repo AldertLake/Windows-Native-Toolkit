@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #pragma once
 
@@ -10,36 +10,40 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "WindowsInfoBPLibrary.generated.h"
 
+/** Native Windows operating-system information helper nodes for Blueprints. */
 UCLASS()
 class SYSTEMUTILITYMODULE_API UWindowsInfoBPLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
-    //Output windwos current version
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
+    /** Returns the current Windows product family, such as Windows 10 or Windows 11. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details", meta = (DisplayName = "Get Windows Version"))
     static FString GetWindowsVersion();
 
-    //Get Windows Build
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
+    /** Returns the Windows build number including UBR when available. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details", meta = (DisplayName = "Get Windows Build"))
     static FString GetWindowsBuild();
 
-    //Get widows edition name eg: Proffesionel, Home, LTSC..
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
+    /** Returns the installed Windows edition, such as Home, Pro, or Enterprise. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details", meta = (DisplayName = "Get Windows Edition"))
     static FString GetWindowsEdition();
 
-    //Get the PC Name eg DESKTOP-XXXXX
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
+    /** Returns the local computer name. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details", meta = (DisplayName = "Get Computer Name"))
     static FString GetPCName();
 
-    //Get local user name 
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details")
+    /** Returns the current local user name. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Windows Details", meta = (DisplayName = "Get User Name"))
     static FString GetLocalUserName();
 
+    /** Returns total physical RAM in gigabytes. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Hardware", meta = (DisplayName = "Get Total RAM (GB)"))
+    static float GetTotalSystemMemoryGB();
+
 private:
-    // Helper to read a string from the Windows registry
     static FString ReadRegistryString(const FString& KeyPath, const FString& ValueName, bool bLocalMachine = true);
 
-    // Helper to read a DWORD from the Windows registry
     static uint32 ReadRegistryDWORD(const FString& KeyPath, const FString& ValueName, bool bLocalMachine = true);
 };
+

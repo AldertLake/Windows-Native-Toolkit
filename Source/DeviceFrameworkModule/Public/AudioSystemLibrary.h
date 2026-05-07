@@ -1,98 +1,87 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #pragma once
+
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "AudioSystemLibrary.generated.h"
 
+/** Selects whether an audio node should work with playback or recording devices. */
+UENUM(BlueprintType)
+enum class EWNTAudioDeviceFlow : uint8
+{
+    Output UMETA(DisplayName = "Output"),
+    Input UMETA(DisplayName = "Input")
+};
+
+/** Selects the Windows default audio-device role to query. */
+UENUM(BlueprintType)
+enum class EWNTAudioDeviceRole : uint8
+{
+    System UMETA(DisplayName = "System Default"),
+    Communication UMETA(DisplayName = "Communication Default")
+};
+
+/** Basic details for one Windows audio endpoint device. */
 USTRUCT(BlueprintType)
 struct FAudioDeviceInfo
 {
     GENERATED_BODY()
 
+    /** True when this is the default system device for its input or output flow. */
     UPROPERTY(BlueprintReadOnly, Category = "Audio")
     bool bIsDefaultDevice = false;
 
+    /** True when this is the default communications device for its input or output flow. */
     UPROPERTY(BlueprintReadOnly, Category = "Audio")
     bool bIsCommunicationDevice = false;
 
+    /** Friendly device name reported by Windows. */
     UPROPERTY(BlueprintReadOnly, Category = "Audio")
     FString DeviceName;
 
+    /** Stable Windows endpoint identifier used by volume, mute, and peak functions. */
     UPROPERTY(BlueprintReadOnly, Category = "Audio")
     FString DeviceID;
 };
 
+/** Native Windows audio endpoint helper nodes for Blueprints. */
 UCLASS()
 class DEVICEFRAMEWORKMODULE_API UAudioSystemLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
+    /** Returns all active audio devices for the selected input or output flow. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Audio Devices"))
+    static TArray<FAudioDeviceInfo> GetAudioDevices(EWNTAudioDeviceFlow Flow);
 
-    // In 2.4.1 These functions are deprecated & should not be used.
+    /** Returns the default Windows endpoint for the selected flow and role. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Default Audio Device"))
+    static bool GetDefaultAudioDevice(EWNTAudioDeviceFlow Flow, EWNTAudioDeviceRole Role, FAudioDeviceInfo& OutDevice, FString& OutError);
 
-    //Get System Current Active Default Audio Output Device Volume From Range 0 to 1.0 As Integer.
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Current System Volume", DeprecatedFunction))
-    static float GetSystemVolume();
+    /** Sets endpoint volume from 0.0 to 1.0 for any input or output device ID. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Audio Volume"))
+    static bool SetAudioDeviceVolume(const FString& DeviceID, float Volume, FString& OutError);
 
-    //Change System Current Active Default Audio Output Device Volume From 0 To 1.0 As Integer.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Current System Volume", DeprecatedFunction))
-    static void SetSystemVolume(float Volume);
+    /** Reads endpoint volume from 0.0 to 1.0 for any input or output device ID. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Audio Volume"))
+    static bool GetAudioDeviceVolume(const FString& DeviceID, float& OutVolume, FString& OutError);
 
-    //Get Current Active Default Audio Output Device Name
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Current Audio Device Name", DeprecatedFunction))
-    static FString GetCurrentAudioDeviceName();
+    /** Sets endpoint mute state for any input or output device ID. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Audio Muted"))
+    static bool SetAudioDeviceMuted(const FString& DeviceID, bool bMuted, FString& OutError);
 
-    //You can do what the functions in the top do by simply using the ones bellow, loop all output devices until you find the default one, cache the default one ID.
-    //With the ID you can do anything related to volume...
-    //With this methode you can even get the default comunication device alone and the default system device.
+    /** Reads endpoint mute state for any input or output device ID. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Is Audio Muted"))
+    static bool GetAudioDeviceMuted(const FString& DeviceID, bool& bMuted, FString& OutError);
 
-    //Warning: i reported that the volume functions do not work with some devices (eg: my xbox controller headset).
-    //The reason is that some devices igonore IAudioEndpointVolume, you can remarke this also in capture devices sometimes...
-
-
-
-    // --- OUTPUT DEVICES ---
-
-    //Scans for all active audio OUTPUT devices (Speakers, Headphones).
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations|Audio Output Devices", meta = (DisplayName = "Get All Audio Output Devices"))
-    static TArray<FAudioDeviceInfo> GetAllAudioOutputDevices();
-
-    //Sets volume for a specific OUTPUT device using its ID.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations|Audio Output Devices", meta = (DisplayName = "Set Audio Output Device Volume"))
-    static void SetVolumeForDevice(const FString& DeviceID, float Volume);
-
-    //Get output audio devices volume by device ID (Speaker..)
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations|Audio Output Devices", meta = (DisplayName = "Get Audio Output Device Volume"))
-    static float GetOutputDeviceVolume(const FString& DeviceID);
-
-    // --- INPUT DEVICES ---
-
-    //Scans for all active audio INPUT devices (Microphones, Line-In).
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations|Audio Input Devices", meta = (DisplayName = "Get All Audio Input Devices"))
-    static TArray<FAudioDeviceInfo> GetAllAudioInputDevices();
-
-    //Sets volume for a specific INPUT device using its ID.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations|Audio Input Devices", meta = (DisplayName = "Set Audio Input Device Volume"))
-    static void SetInputVolumeForDevice(const FString& DeviceID, float Volume);
-
-    //Get input audio devices volume by device ID (Micro....)
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations|Audio Input Devices", meta = (DisplayName = "Get Audio Input Device Volume"))
-    static float GetInputDeviceVolume(const FString& DeviceID);
-
-    // --- GLOBAL FOR VISUALIZATION --
-
-    //This function will output the highest sound value as float normalized from 0 to 1.
-    //Used to visualize the audio sound.
-    //Do not tick this function in your game ! also don't do some retarded moves like ticking it with a delay..lol
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Audio Device Peak Value"))
-    static float GetAudioDevicePeakValue(const FString& DeviceID);
-
-    //To the person reading please if you find any vocabulary mistake, dont get mad because english is not my first language XD.
-
+    /** Reads the current endpoint peak level from 0.0 to 1.0 for visualization. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Audio Peak"))
+    static bool GetAudioDevicePeak(const FString& DeviceID, float& OutPeakValue, FString& OutError);
 };
+

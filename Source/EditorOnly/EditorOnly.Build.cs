@@ -1,10 +1,11 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 using UnrealBuildTool;
+
 public class EditorOnly : ModuleRules
 {
     public EditorOnly(ReadOnlyTargetRules Target) : base(Target)
@@ -25,3 +26,5 @@ public class EditorOnly : ModuleRules
         });
     }
 }
+
+

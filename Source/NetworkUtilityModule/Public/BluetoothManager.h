@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #pragma once
 
@@ -10,6 +10,30 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "BluetoothManager.generated.h"
 
+/** Blueprint-friendly summary for a paired or connected Bluetooth device. */
+USTRUCT(BlueprintType)
+struct FBluetoothDeviceInfo
+{
+    GENERATED_BODY()
+
+    /** Friendly Bluetooth device name reported by Windows. */
+    UPROPERTY(BlueprintReadOnly, Category = "Bluetooth")
+    FString Name;
+
+    /** Device address formatted by the Bluetooth stack. */
+    UPROPERTY(BlueprintReadOnly, Category = "Bluetooth")
+    FString Address;
+
+    /** True when the device is currently connected. */
+    UPROPERTY(BlueprintReadOnly, Category = "Bluetooth")
+    bool bIsConnected = false;
+
+    /** True when the device is paired or otherwise authenticated. */
+    UPROPERTY(BlueprintReadOnly, Category = "Bluetooth")
+    bool bIsAuthenticated = false;
+};
+
+/** Native Windows Bluetooth helper nodes for Blueprints. */
 UCLASS()
 class NETWORKUTILITYMODULE_API UBluetoothManager : public UBlueprintFunctionLibrary
 {
@@ -17,16 +41,20 @@ class NETWORKUTILITYMODULE_API UBluetoothManager : public UBlueprintFunctionLibr
 
 public:
 
-    //Verify if bluetooth is enabled by user or still disabled.
+    /** Returns true when Windows reports a physical Bluetooth adapter. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library")
+    static bool HasBluetoothAdapter();
+
+    /** Returns true when a Bluetooth radio is available and enabled. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library")
     static bool IsBluetoothEnabled();
 
-    // Number of paired devices (returns 0 on failure)
+    /** Returns paired and remembered Bluetooth devices. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library")
-    static int32 GetPairedDeviceCount();
+    static TArray<FBluetoothDeviceInfo> GetPairedDevices();
 
-    // Get the paired device name by index. Returns empty FString on invalid index or error.
+    /** Returns true when a paired Bluetooth device address is currently connected. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library")
-    static FString GetPairedDeviceName(int32 DeviceIndex);
- 
+    static bool IsBluetoothDeviceConnected(FString DeviceAddress);
 };
+

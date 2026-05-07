@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #include "FileSystemBlueprintLibrary.h"
 #include "HAL/FileManager.h"
@@ -13,6 +13,9 @@
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
 #include <fileapi.h>
+#include <shobjidl.h>
+#include <shellapi.h>
+#include <shlobj.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
@@ -33,12 +36,114 @@ static FString FixPath(const FString& Path)
     return Fixed;
 }
 
+static bool IsRootPath(const FString& Path)
+{
+    if (Path.Equals(TEXT("/")) || Path.Equals(TEXT("\\")))
+    {
+        return true;
+    }
+
+    if (Path.Len() <= 3 && Path.Len() >= 2 && Path[1] == TEXT(':'))
+    {
+        return true;
+    }
+
+    return FPaths::IsDrive(Path);
+}
+
+static bool IsWindowsSystemPath(const FString& Path)
+{
+#if PLATFORM_WINDOWS
+    TCHAR WindowsDirectory[MAX_PATH] = { 0 };
+    if (GetWindowsDirectory(WindowsDirectory, MAX_PATH) <= 0)
+    {
+        return false;
+    }
+
+    FString SystemPath = FixPath(FString(WindowsDirectory));
+    FString TargetPath = FixPath(Path);
+
+    if (!SystemPath.EndsWith(TEXT("/")))
+    {
+        SystemPath += TEXT("/");
+    }
+
+    if (!TargetPath.EndsWith(TEXT("/")))
+    {
+        TargetPath += TEXT("/");
+    }
+
+    return TargetPath.Equals(SystemPath, ESearchCase::IgnoreCase) || TargetPath.StartsWith(SystemPath, ESearchCase::IgnoreCase);
+#else
+    return false;
+#endif
+}
+
+static bool ValidatePathString(const FString& RawPath, FString& OutPath, FString& OutError)
+{
+    if (RawPath.TrimStartAndEnd().IsEmpty())
+    {
+        OutError = TEXT("Path is empty.");
+        return false;
+    }
+
+    OutPath = FixPath(RawPath);
+    FText Reason;
+    if (!FPaths::ValidatePath(OutPath, &Reason))
+    {
+        OutError = FString::Printf(TEXT("Path is invalid: %s"), *Reason.ToString());
+        return false;
+    }
+
+    return true;
+}
+
+static bool ValidateDestructivePath(const FString& RawPath, FString& OutPath, FString& OutError)
+{
+    if (!ValidatePathString(RawPath, OutPath, OutError))
+    {
+        return false;
+    }
+
+    if (IsRootPath(OutPath))
+    {
+        OutError = TEXT("Refusing to modify a drive root.");
+        return false;
+    }
+
+    if (IsWindowsSystemPath(OutPath))
+    {
+        OutError = TEXT("Refusing to modify the Windows system directory.");
+        return false;
+    }
+
+    return true;
+}
+
+static bool AreSamePath(const FString& A, const FString& B)
+{
+    return FixPath(A).Equals(FixPath(B), ESearchCase::IgnoreCase);
+}
+
+static bool IsValidCleanFilename(const FString& Name)
+{
+    return !Name.TrimStartAndEnd().IsEmpty()
+        && Name == FPaths::GetCleanFilename(Name)
+        && !Name.Contains(TEXT("/"))
+        && !Name.Contains(TEXT("\\"))
+        && FPaths::MakeValidFileName(Name).Equals(Name);
+}
+
 bool UFileSystemBlueprintLibrary::MoveFileToFolder(const FString& Source, const FString& Destination, bool bOverwrite, FString& OutError)
 {
     IPlatformFile& PlatformFile = GetPlatformFile();
 
-    FString CleanSource = FixPath(Source);
-    FString CleanDestFolder = FixPath(Destination);
+    FString CleanSource;
+    FString CleanDestFolder;
+    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidatePathString(Destination, CleanDestFolder, OutError))
+    {
+        return false;
+    }
 
     if (!PlatformFile.FileExists(*CleanSource))
     {
@@ -50,6 +155,17 @@ bool UFileSystemBlueprintLibrary::MoveFileToFolder(const FString& Source, const 
     FString FullDestPath = FPaths::Combine(CleanDestFolder, FileName);
     FPaths::NormalizeFilename(FullDestPath);
 
+    if (AreSamePath(CleanSource, FullDestPath))
+    {
+        OutError = TEXT("Source and destination are the same file.");
+        return false;
+    }
+
+    if (PlatformFile.DirectoryExists(*FullDestPath))
+    {
+        OutError = TEXT("Destination is a directory, not a file.");
+        return false;
+    }
 
     if (PlatformFile.FileExists(*FullDestPath))
     {
@@ -102,8 +218,12 @@ bool UFileSystemBlueprintLibrary::MoveFolderToFolder(const FString& Source, cons
 {
     IPlatformFile& PlatformFile = GetPlatformFile();
 
-    FString CleanSource = FixPath(Source);
-    FString CleanDestParent = FixPath(Destination); 
+    FString CleanSource;
+    FString CleanDestParent;
+    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidatePathString(Destination, CleanDestParent, OutError))
+    {
+        return false;
+    }
 
     if (!PlatformFile.DirectoryExists(*CleanSource))
     {
@@ -116,8 +236,18 @@ bool UFileSystemBlueprintLibrary::MoveFolderToFolder(const FString& Source, cons
     FString FullDestPath = FPaths::Combine(CleanDestParent, FolderName);
     FPaths::NormalizeFilename(FullDestPath);
 
+    if (AreSamePath(CleanSource, FullDestPath))
+    {
+        OutError = TEXT("Source and destination are the same folder.");
+        return false;
+    }
 
-    if (FullDestPath.StartsWith(CleanSource))
+    FString SourceCheck = CleanSource;
+    if (!SourceCheck.EndsWith(TEXT("/"))) SourceCheck += TEXT("/");
+    FString DestCheck = FullDestPath;
+    if (!DestCheck.EndsWith(TEXT("/"))) DestCheck += TEXT("/");
+
+    if (DestCheck.StartsWith(SourceCheck))
     {
         OutError = TEXT("Cannot move a folder into itself.");
         return false;
@@ -135,7 +265,11 @@ bool UFileSystemBlueprintLibrary::MoveFolderToFolder(const FString& Source, cons
 
     if (!PlatformFile.DirectoryExists(*CleanDestParent))
     {
-        PlatformFile.CreateDirectoryTree(*CleanDestParent);
+        if (!PlatformFile.CreateDirectoryTree(*CleanDestParent))
+        {
+            OutError = TEXT("Failed to create destination directory.");
+            return false;
+        }
     }
 
     if (PlatformFile.MoveFile(*FullDestPath, *CleanSource))
@@ -150,7 +284,7 @@ bool UFileSystemBlueprintLibrary::MoveFolderToFolder(const FString& Source, cons
             return true;
         }
         OutError = TEXT("Moved data successfully, but failed to delete source folder (Permissions?).");
-        return true; 
+        return true;
     }
 
     OutError = TEXT("Failed to move folder. (Check permissions or open files).");
@@ -160,7 +294,11 @@ bool UFileSystemBlueprintLibrary::MoveFolderToFolder(const FString& Source, cons
 bool UFileSystemBlueprintLibrary::DeleteFileW(const FString& Path, FString& OutError)
 {
     IPlatformFile& PlatformFile = GetPlatformFile();
-    FString Target = FixPath(Path);
+    FString Target;
+    if (!ValidateDestructivePath(Path, Target, OutError))
+    {
+        return false;
+    }
 
     if (!PlatformFile.FileExists(*Target))
     {
@@ -182,7 +320,11 @@ bool UFileSystemBlueprintLibrary::DeleteFileW(const FString& Path, FString& OutE
 bool UFileSystemBlueprintLibrary::DeleteFolder(const FString& Path, FString& OutError)
 {
     IPlatformFile& PlatformFile = GetPlatformFile();
-    FString Target = FixPath(Path);
+    FString Target;
+    if (!ValidateDestructivePath(Path, Target, OutError))
+    {
+        return false;
+    }
 
     if (!PlatformFile.DirectoryExists(*Target))
     {
@@ -218,22 +360,9 @@ FfsFileInfo UFileSystemBlueprintLibrary::GetFileInfo(const FString& Path)
 
         if (Info.bIsDirectory)
         {
-            struct FFolderSizeVisitor : public IPlatformFile::FDirectoryVisitor
-            {
-                int64 Size = 0;
-                virtual bool Visit(const TCHAR* FilenameOrDirectory, bool bIsDirectory) override
-                {
-                    if (!bIsDirectory)
-                    {
-                        Size += IPlatformFile::GetPlatformPhysical().FileSize(FilenameOrDirectory);
-                    }
-                    return true;
-                }
-            };
 
-            FFolderSizeVisitor Visitor;
-            PlatformFile.IterateDirectoryRecursively(*Target, Visitor);
-            Info.FileSizeBytes = Visitor.Size;
+
+            Info.FileSizeBytes = 0;
         }
     }
 
@@ -289,7 +418,7 @@ TArray<FPartitionInfo> UFileSystemBlueprintLibrary::GetAllAvailablePartitions()
                 if (GetDiskFreeSpaceEx(CurrentDrive, &FreeBytesAvailable, &TotalNumberOfBytes, &TotalNumberOfFreeBytes))
                 {
                     Info.TotalSizeBytes = (int64)TotalNumberOfBytes.QuadPart;
-                    Info.FreeSizeBytes = (int64)TotalNumberOfFreeBytes.QuadPart; 
+                    Info.FreeSizeBytes = (int64)TotalNumberOfFreeBytes.QuadPart;
                     Info.UsedSizeBytes = Info.TotalSizeBytes - Info.FreeSizeBytes;
                 }
 
@@ -312,11 +441,11 @@ TArray<FPartitionInfo> UFileSystemBlueprintLibrary::GetAllAvailablePartitions()
                 }
                 else
                 {
-                    Info.VolumeLabel = TEXT("Removable Disk"); 
+                    Info.VolumeLabel = TEXT("Removable Disk");
                     Info.FileSystem = TEXT("Unknown");
                 }
 
-                SetErrorMode(OldMode); // Restore error mode
+                SetErrorMode(OldMode);
             }
 
             Partitions.Add(Info);
@@ -333,7 +462,11 @@ bool UFileSystemBlueprintLibrary::RenameFile(const FString& FilePath, const FStr
 {
     IPlatformFile& PlatformFile = GetPlatformFile();
 
-    FString CleanSource = FixPath(FilePath);
+    FString CleanSource;
+    if (!ValidateDestructivePath(FilePath, CleanSource, OutError))
+    {
+        return false;
+    }
 
     if (!PlatformFile.FileExists(*CleanSource))
     {
@@ -342,10 +475,21 @@ bool UFileSystemBlueprintLibrary::RenameFile(const FString& FilePath, const FStr
     }
 
     FString ParentDir = FPaths::GetPath(CleanSource);
-    FString CleanNewName = FPaths::GetCleanFilename(NewFileName); 
+    FString CleanNewName = FPaths::GetCleanFilename(NewFileName);
+    if (!IsValidCleanFilename(CleanNewName))
+    {
+        OutError = TEXT("New file name is invalid.");
+        return false;
+    }
+
     FString FullDestPath = FPaths::Combine(ParentDir, CleanNewName);
 
     FPaths::NormalizeFilename(FullDestPath);
+    if (AreSamePath(CleanSource, FullDestPath))
+    {
+        OutError = TEXT("Source and target file names are the same.");
+        return false;
+    }
 
     if (PlatformFile.FileExists(*FullDestPath))
     {
@@ -382,3 +526,86 @@ bool UFileSystemBlueprintLibrary::RenameFile(const FString& FilePath, const FStr
 
     return true;
 }
+
+bool UFileSystemBlueprintLibrary::RecycleFile(const FString& FilePath, FString& OutError)
+{
+    FString Target;
+    if (!ValidateDestructivePath(FilePath, Target, OutError))
+    {
+        return false;
+    }
+    if (!GetPlatformFile().FileExists(*Target))
+    {
+        OutError = TEXT("File does not exist.");
+        return false;
+    }
+
+#if PLATFORM_WINDOWS
+    FString CleanPath = Target;
+    CleanPath.ReplaceInline(TEXT("/"), TEXT("\\"));
+
+    CleanPath += TEXT('\0');
+
+    SHFILEOPSTRUCTW FileOp = { 0 };
+    FileOp.wFunc = FO_DELETE;
+    FileOp.pFrom = *CleanPath;
+    FileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+
+    int Result = SHFileOperationW(&FileOp);
+    if (Result == 0) return true;
+
+    OutError = FString::Printf(TEXT("Failed to recycle file. Windows Error Code: %d"), Result);
+    return false;
+#else
+    OutError = TEXT("Not supported on this platform.");
+    return false;
+#endif
+}
+
+bool UFileSystemBlueprintLibrary::RecycleFolder(const FString& FolderPath, FString& OutError)
+{
+    FString Target;
+    if (!ValidateDestructivePath(FolderPath, Target, OutError))
+    {
+        return false;
+    }
+    if (!GetPlatformFile().DirectoryExists(*Target))
+    {
+        OutError = TEXT("Folder does not exist.");
+        return false;
+    }
+
+#if PLATFORM_WINDOWS
+    FString CleanPath = Target;
+    CleanPath.ReplaceInline(TEXT("/"), TEXT("\\"));
+
+    CleanPath += TEXT('\0');
+
+    SHFILEOPSTRUCTW FileOp = { 0 };
+    FileOp.wFunc = FO_DELETE;
+    FileOp.pFrom = *CleanPath;
+    FileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+
+    int Result = SHFileOperationW(&FileOp);
+    if (Result == 0) return true;
+
+    OutError = FString::Printf(TEXT("Failed to recycle folder. Windows Error Code: %d"), Result);
+    return false;
+#else
+    OutError = TEXT("Not supported on this platform.");
+    return false;
+#endif
+}
+
+void UFileSystemBlueprintLibrary::ShowFileInExplorer(const FString& FilePath)
+{
+#if PLATFORM_WINDOWS
+    FString CleanPath = FixPath(FilePath);
+    CleanPath.ReplaceInline(TEXT("/"), TEXT("\\"));
+
+    FString Args = FString::Printf(TEXT("/select,\"%s\""), *CleanPath);
+    FPlatformProcess::CreateProc(TEXT("explorer.exe"), *Args, true, false, false, nullptr, 0, nullptr, nullptr);
+#endif
+}
+
+

@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 using UnrealBuildTool;
 
@@ -16,7 +16,11 @@ public class SystemUtilityModule : ModuleRules
         {
             "Core",
             "CoreUObject",
-            "Engine",
+            "Engine"
+        });
+
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
             "Slate",
             "SlateCore"
         });
@@ -25,13 +29,15 @@ public class SystemUtilityModule : ModuleRules
         {
             PublicSystemLibraries.AddRange(new string[]
             {
-                "Shell32.lib",    // OpenApps, ToastNotificationLibrary
-                "Comctl32.lib",   // MessageBoxWindows
-                "Advapi32.lib",   // WindowsInfoBPLibrary
-                "Winmm.lib",      // Audio fallbacks
-                "XInput.lib",     // May be used in message-based user notifications
-                "dxgi.lib",      // GPU info (part of WindowsInfoBPLibrary)
+                "Shell32.lib",
+                "Comctl32.lib",
+                "Advapi32.lib",
+                "Winmm.lib",
+                "XInput.lib",
+                "dxgi.lib",
             });
         }
     }
 }
+
+

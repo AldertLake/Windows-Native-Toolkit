@@ -1,10 +1,10 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
-#include "ToastNotificationLibrary.h" 
+#include "ToastNotificationLibrary.h"
 #include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
 #include "Framework/Application/SlateApplication.h"
@@ -44,9 +44,9 @@ void UToastNotificationLibrary::ShowToastNotification(const FString& Title, cons
     Nid.uID = TRAY_ICON_ID;
 
     Nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_INFO;
-    Nid.uCallbackMessage = WM_USER + 300; // Unique callback ID
+    Nid.uCallbackMessage = WM_USER + 300;
 
-    // Load Game Icon
+
     HICON GameIcon = (HICON)GetClassLongPtr(ParentWindow, GCLP_HICON);
     Nid.hIcon = GameIcon ? GameIcon : LoadIcon(NULL, IDI_APPLICATION);
 
@@ -63,29 +63,29 @@ void UToastNotificationLibrary::ShowToastNotification(const FString& Title, cons
     StringCchCopyW(Nid.szInfoTitle, ARRAYSIZE(Nid.szInfoTitle), (LPCWSTR)*Title);
     StringCchCopyW(Nid.szInfo, ARRAYSIZE(Nid.szInfo), (LPCWSTR)*Message);
 
-    // Set Icon Type
+
     switch (IconType)
     {
-    case EToastIconType::Info:    Nid.dwInfoFlags = NIIF_INFO; break;
-    case EToastIconType::Warning: Nid.dwInfoFlags = NIIF_WARNING; break;
-    case EToastIconType::Error:   Nid.dwInfoFlags = NIIF_ERROR; break;
-    default:                      Nid.dwInfoFlags = NIIF_NONE; break;
+    case EToastIconType::Info:    Nid.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME; break;
+    case EToastIconType::Warning: Nid.dwInfoFlags = NIIF_WARNING | NIIF_RESPECT_QUIET_TIME; break;
+    case EToastIconType::Error:   Nid.dwInfoFlags = NIIF_ERROR | NIIF_RESPECT_QUIET_TIME; break;
+    default:                      Nid.dwInfoFlags = NIIF_NONE | NIIF_RESPECT_QUIET_TIME; break;
     }
 
     BOOL bSuccess = Shell_NotifyIconW(NIM_MODIFY, &Nid);
 
     if (!bSuccess)
     {
-        // Icon missing, add it fresh
+
         bSuccess = Shell_NotifyIconW(NIM_ADD, &Nid);
 
         if (bSuccess)
         {
-            // Enable modern behavior (Version 4)
+
             Nid.uVersion = NOTIFYICON_VERSION_4;
             Shell_NotifyIconW(NIM_SETVERSION, &Nid);
 
-            // Register cleanup
+
             if (!bIsCleanupRegistered)
             {
                 FCoreDelegates::OnPreExit.AddStatic(&UToastNotificationLibrary::CleanupTrayIcon);
@@ -102,7 +102,7 @@ void UToastNotificationLibrary::CleanupTrayIcon()
     NOTIFYICONDATAW Nid = { 0 };
     Nid.cbSize = sizeof(NOTIFYICONDATAW);
 
-    // Try to get window handle safely
+
     if (GEngine && GEngine->GameViewport)
     {
         TSharedPtr<SWindow> Win = GEngine->GameViewport->GetWindow();
@@ -116,3 +116,5 @@ void UToastNotificationLibrary::CleanupTrayIcon()
     Shell_NotifyIconW(NIM_DELETE, &Nid);
 #endif
 }
+
+

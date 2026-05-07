@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #pragma once
 
@@ -10,6 +10,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "MessageBoxWindows.generated.h"
 
+/** Standard result states returned by a native Windows message box. */
 UENUM(BlueprintType)
 enum class EMessageBoxResult : uint8
 {
@@ -18,6 +19,7 @@ enum class EMessageBoxResult : uint8
     Canceled    UMETA(DisplayName = "Canceled (Cancel/X)")
 };
 
+/** Standard Windows button layouts for a message box. */
 UENUM(BlueprintType)
 enum class EMessageBoxButtons : uint8
 {
@@ -27,6 +29,7 @@ enum class EMessageBoxButtons : uint8
     YesNoCancel         UMETA(DisplayName = "Yes, No & Cancel")
 };
 
+/** Icon styles supported by the native message-box helpers. */
 UENUM(BlueprintType)
 enum class EWNTMessageBoxIcon : uint8
 {
@@ -37,6 +40,7 @@ enum class EWNTMessageBoxIcon : uint8
     Question    UMETA(DisplayName = "Question")
 };
 
+/** Result states for the custom two-button dialog helper. */
 UENUM(BlueprintType)
 enum class ECustomDialogResult : uint8
 {
@@ -44,6 +48,7 @@ enum class ECustomDialogResult : uint8
     SecondButton  UMETA(DisplayName = "Second Button / Cancel")
 };
 
+/** Native Windows message-box helper nodes for Blueprints. */
 UCLASS()
 class SYSTEMUTILITYMODULE_API UNativeMessageBox : public UBlueprintFunctionLibrary
 {
@@ -51,10 +56,8 @@ class SYSTEMUTILITYMODULE_API UNativeMessageBox : public UBlueprintFunctionLibra
 
 public:
 
-    //This will show a native windows message box with buttons & custom title/text.
-    //Yes trigger Confirm & No trigger declined & Cancel trigger itself.
-    //In case of closing the messsagebox without any button pressed, cancel will be triggered.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Message Boxes", meta = (ExpandEnumAsExecs = "Result"))
+    /** Shows a native Windows message box and expands the result enum into Blueprint execution pins. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Message Boxes", meta = (DisplayName = "Show Native Message Box", ExpandEnumAsExecs = "Result"))
     static void ShowNativeMessageBox(
         const FString& Title,
         const FString& Message,
@@ -63,11 +66,8 @@ public:
         EMessageBoxResult& Result
     );
 
-    //Show a message box with some custom buttons titles & names (Less native than the the ShowNativeMessagBox
-    //But you can customize buttons titles here.
-    //If the messagebox is closed with nothing selected, this will trigger second button automaticaly.
-    //Will not appear if buttons title is empty. always make sure the buttons have title.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Message Boxes", meta = (DisplayName = "Show Regular Message Box"), meta = (ExpandEnumAsExecs = "Result"))
+    /** Shows a native task dialog with custom button text and expands the selected result into Blueprint execution pins. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Message Boxes", meta = (DisplayName = "Show Regular Message Box", ExpandEnumAsExecs = "Result"))
     static void ShowMessageBox(
         const FString& Title,
         const FString& Message,
@@ -78,3 +78,4 @@ public:
         ECustomDialogResult& Result
     );
 };
+

@@ -1,17 +1,17 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #include "HardwareInfoLibrary.h"
-
-#include "HardwareInfo.h"            
+#include "Async/Async.h"
+#include "HAL/PlatformProcess.h"
+#include "Misc/App.h"
 #include "RHI.h"
-#include "Misc/ScopeLock.h"
-#include "HAL/PlatformMisc.h"      
-#include "Misc/ConfigCacheIni.h"    
-#include "Misc/CoreDelegates.h" 
+#include "HAL/PlatformMisc.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/CoreDelegates.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -19,499 +19,861 @@
 #include <dxgi1_4.h>
 #include <wrl/client.h>
 #include <Xinput.h>
-#include <shellapi.h> //for cmd things..
+#include <shellapi.h>
+#include <pdh.h>
+#include <pdhmsg.h>
 #include "Windows/HideWindowsPlatformTypes.h"
-#endif
 
-//Important for vram query..since there is multi
+using Microsoft::WRL::ComPtr;
 
-// --- VRAM HELPERS & CACHE ---
 
-using namespace Microsoft::WRL;
 
-#if PLATFORM_WINDOWS
-static FCriticalSection AdapterCacheMutex;
-static ComPtr<IDXGIAdapter3> CachedAdapter = nullptr;
 
-static bool GetCachedAdapter(ComPtr<IDXGIAdapter3>& OutAdapter)
+
+namespace WNT_Private
 {
-    FScopeLock Lock(&AdapterCacheMutex);
 
-    if (CachedAdapter)
+    struct FAdapterEntry
     {
-        OutAdapter = CachedAdapter;
-        return true;
-    }
-
-    ComPtr<IDXGIFactory4> Factory;
-
-    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&Factory))))
-    {
-        return false;
-    }
-
-    ComPtr<IDXGIAdapter1> TempAdapter1;
-    uint32 Index = 0;
-    bool bFound = false;
-
-    while (Factory->EnumAdapters1(Index, &TempAdapter1) != DXGI_ERROR_NOT_FOUND)
-    {
+        ComPtr<IDXGIAdapter3> Adapter;
         DXGI_ADAPTER_DESC1 Desc;
-        TempAdapter1->GetDesc1(&Desc);
+        int32 Index;
+        bool bIsActiveRHI;
+    };
 
-        if (Desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-        {
-            Index++;
-            continue;
-        }
+    static FCriticalSection CacheMutex;
+    static TArray<FAdapterEntry> CachedAdapters;
+    static int32 ActiveRHIIndex = 0;
+    static bool bEnumerated = false;
 
-        if (Desc.VendorId == GRHIVendorId || GRHIVendorId == 0)
+    static EGPUVendor VendorIdToEnum(uint32 Id)
+    {
+        switch (Id)
         {
-            if (SUCCEEDED(TempAdapter1.As(&CachedAdapter)))
-            {
-                OutAdapter = CachedAdapter;
-                bFound = true;
-                break;
-            }
+        case 0x10DE: return EGPUVendor::Nvidia;
+        case 0x1002: return EGPUVendor::AMD;
+        case 0x8086: return EGPUVendor::Intel;
+        case 0x5143: return EGPUVendor::Qualcomm;
+        default:     return EGPUVendor::Unknown;
         }
-        Index++;
     }
 
-    return bFound;
-}
-
-static bool QueryGPUStats(int32& OutTotalMB, int32& OutBudgetMB, int32& OutUsageMB)
-{
-    OutTotalMB = OutBudgetMB = OutUsageMB = 0;
-
-    ComPtr<IDXGIAdapter3> Adapter;
-    if (GetCachedAdapter(Adapter))
+    static void EnumerateAdapters()
     {
-        DXGI_ADAPTER_DESC1 Desc;
-        if (SUCCEEDED(Adapter->GetDesc1(&Desc)))
+        if (bEnumerated) return;
+        bEnumerated = true;
+
+        ComPtr<IDXGIFactory4> Factory;
+        if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&Factory)))) return;
+
+        ComPtr<IDXGIAdapter1> Adapter1;
+        for (UINT i = 0; Factory->EnumAdapters1(i, &Adapter1) != DXGI_ERROR_NOT_FOUND; ++i)
         {
-            OutTotalMB = (int32)(Desc.DedicatedVideoMemory / 1024 / 1024);
+            DXGI_ADAPTER_DESC1 Desc;
+            if (FAILED(Adapter1->GetDesc1(&Desc))) { Adapter1.Reset(); continue; }
+            if (Desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) { Adapter1.Reset(); continue; }
+
+            FAdapterEntry Entry;
+            Entry.Desc = Desc;
+            Entry.Index = CachedAdapters.Num();
+            Entry.bIsActiveRHI = (GRHIVendorId != 0 && Desc.VendorId == GRHIVendorId);
+
+            if (Entry.bIsActiveRHI) ActiveRHIIndex = Entry.Index;
+            Adapter1.As(&Entry.Adapter);
+            CachedAdapters.Add(MoveTemp(Entry));
+            Adapter1.Reset();
         }
-        else
+
+
+        if (CachedAdapters.Num() > 0 && ActiveRHIIndex >= CachedAdapters.Num())
+            ActiveRHIIndex = 0;
+    }
+
+    static FAdapterEntry* GetAdapter(int32 Index)
+    {
+        FScopeLock Lock(&CacheMutex);
+        EnumerateAdapters();
+        return CachedAdapters.IsValidIndex(Index) ? &CachedAdapters[Index] : nullptr;
+    }
+
+    static FAdapterEntry* GetRHIAdapter()
+    {
+        FScopeLock Lock(&CacheMutex);
+        EnumerateAdapters();
+        return CachedAdapters.IsValidIndex(ActiveRHIIndex) ? &CachedAdapters[ActiveRHIIndex] : nullptr;
+    }
+
+
+    static FCriticalSection PerfMutex;
+    static PDH_HQUERY PerfQuery = nullptr;
+    static PDH_HCOUNTER DedicatedCounter = nullptr;
+    static PDH_HCOUNTER SharedCounter = nullptr;
+    static PDH_HCOUNTER GPUEngineCounter = nullptr;
+    static PDH_HCOUNTER CPUCounter = nullptr;
+    static bool bPerfInitialized = false;
+
+    static bool InitPerfCounters()
+    {
+        if (bPerfInitialized) return PerfQuery != nullptr;
+        bPerfInitialized = true;
+
+        if (::PdhOpenQuery(nullptr, 0, &PerfQuery) != ERROR_SUCCESS)
         {
+            PerfQuery = nullptr;
             return false;
         }
 
-        DXGI_QUERY_VIDEO_MEMORY_INFO Info;
-        if (SUCCEEDED(Adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &Info)))
-        {
-            OutUsageMB = (int32)(Info.CurrentUsage / 1024 / 1024);
-            OutBudgetMB = (int32)(Info.Budget / 1024 / 1024);
-            return true;
-        }
+
+        ::PdhAddEnglishCounter(PerfQuery, TEXT("\\GPU Adapter Memory(*)\\Dedicated Usage"), 0, &DedicatedCounter);
+        ::PdhAddEnglishCounter(PerfQuery, TEXT("\\GPU Adapter Memory(*)\\Shared Usage"), 0, &SharedCounter);
+        ::PdhAddEnglishCounter(PerfQuery, TEXT("\\GPU Engine(*)\\Utilization Percentage"), 0, &GPUEngineCounter);
+        ::PdhAddEnglishCounter(PerfQuery, TEXT("\\Processor(_Total)\\% Processor Time"), 0, &CPUCounter);
+
+
+        ::PdhCollectQueryData(PerfQuery);
+        return true;
     }
-    return false;
+
+    static void CollectPerfData()
+    {
+        if (PerfQuery) ::PdhCollectQueryData(PerfQuery);
+    }
+
+    static FString FormatLUID(const LUID& Luid)
+    {
+        return FString::Printf(TEXT("luid_0x%08x_0x%08x"),
+            static_cast<uint32>(Luid.HighPart), Luid.LowPart);
+    }
+
+
+    static int64 QueryCounterForLUID(PDH_HCOUNTER Counter, const FString& LuidStr)
+    {
+        if (!Counter) return 0;
+
+        DWORD BufSize = 0, Count = 0;
+        ::PdhGetFormattedCounterArray(Counter, PDH_FMT_LARGE, &BufSize, &Count, nullptr);
+        if (BufSize == 0) return 0;
+
+        TArray<uint8> Buf;
+        Buf.SetNumUninitialized(BufSize);
+        auto* Items = reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM*>(Buf.GetData());
+
+        if (::PdhGetFormattedCounterArray(Counter, PDH_FMT_LARGE, &BufSize, &Count, Items) != ERROR_SUCCESS)
+            return 0;
+
+        int64 Total = 0;
+        for (DWORD i = 0; i < Count; ++i)
+        {
+            FString Name(Items[i].szName);
+            if (Name.Contains(LuidStr))
+                Total += Items[i].FmtValue.largeValue;
+        }
+        return Total;
+    }
+
+
+    static float QueryGPUUtil(const FString& LuidStr)
+    {
+        if (!GPUEngineCounter) return 0.0f;
+
+        DWORD BufSize = 0, Count = 0;
+        ::PdhGetFormattedCounterArray(GPUEngineCounter, PDH_FMT_DOUBLE, &BufSize, &Count, nullptr);
+        if (BufSize == 0) return 0.0f;
+
+        TArray<uint8> Buf;
+        Buf.SetNumUninitialized(BufSize);
+        auto* Items = reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM_W*>(Buf.GetData());
+
+        if (::PdhGetFormattedCounterArray(GPUEngineCounter, PDH_FMT_DOUBLE, &BufSize, &Count, Items) != ERROR_SUCCESS)
+            return 0.0f;
+
+
+        TMap<FString, double> EngineUtils;
+        for (DWORD i = 0; i < Count; ++i)
+        {
+            FString Name(Items[i].szName);
+            if (!Name.Contains(LuidStr)) continue;
+
+
+            int32 EngIdx = INDEX_NONE;
+            Name.FindLastChar(TEXT('_'), EngIdx);
+            FString EngType = (EngIdx != INDEX_NONE) ? Name.Mid(Name.Find(TEXT("engtype_"))) : TEXT("unknown");
+
+            double& Sum = EngineUtils.FindOrAdd(EngType);
+            Sum += Items[i].FmtValue.doubleValue;
+        }
+
+        double MaxUtil = 0.0;
+        for (auto& Pair : EngineUtils)
+        {
+            MaxUtil = FMath::Max(MaxUtil, Pair.Value);
+        }
+        return static_cast<float>(FMath::Clamp(MaxUtil, 0.0, 100.0));
+    }
 }
+
 #endif
 
-// --- PUBLIC BP FUNCTIONS ---
+namespace WNT_Command
+{
+    static FString GetShellExecutable(EWNTCommandShell Shell)
+    {
+#if PLATFORM_WINDOWS
+        return Shell == EWNTCommandShell::PowerShell ? TEXT("powershell.exe") : TEXT("cmd.exe");
+#else
+        return FString();
+#endif
+    }
 
-void USystemInfoBPLibrary::GetMemoryInfo(int64& TotalPhysicalMB, int64& UsedPhysicalMB, int64& FreePhysicalMB,
+    static FString EscapeForDoubleQuotes(const FString& Value)
+    {
+        FString Escaped = Value;
+        Escaped.ReplaceInline(TEXT("\""), TEXT("\\\""));
+        return Escaped;
+    }
+
+    static FString BuildShellParameters(EWNTCommandShell Shell, const FString& Command)
+    {
+        if (Shell == EWNTCommandShell::PowerShell)
+        {
+            return FString::Printf(TEXT("-NoProfile -ExecutionPolicy Bypass -Command \"%s\""), *EscapeForDoubleQuotes(Command));
+        }
+        return FString::Printf(TEXT("/S /C \"%s\""), *Command);
+    }
+
+    static bool StartElevated(const FString& Executable, const FString& Parameters, bool bHidden, const FString& WorkingDirectory, FWNTCommandResult* OutResult)
+    {
+#if PLATFORM_WINDOWS
+        SHELLEXECUTEINFO ShellInfo = {};
+        ShellInfo.cbSize = sizeof(SHELLEXECUTEINFO);
+        ShellInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
+        ShellInfo.lpVerb = TEXT("runas");
+        ShellInfo.lpFile = *Executable;
+        ShellInfo.lpParameters = *Parameters;
+        ShellInfo.lpDirectory = WorkingDirectory.IsEmpty() ? nullptr : *WorkingDirectory;
+        ShellInfo.nShow = bHidden ? SW_HIDE : SW_SHOW;
+
+        const BOOL bStarted = ShellExecuteEx(&ShellInfo);
+        if (!bStarted)
+        {
+            if (OutResult)
+            {
+                OutResult->ErrorMessage = FString::Printf(TEXT("Failed to start elevated command. Windows error: %lu"), GetLastError());
+            }
+            return false;
+        }
+
+        if (OutResult)
+        {
+            OutResult->bStarted = true;
+            if (ShellInfo.hProcess)
+            {
+                WaitForSingleObject(ShellInfo.hProcess, INFINITE);
+                DWORD ExitCode = 0;
+                if (GetExitCodeProcess(ShellInfo.hProcess, &ExitCode))
+                {
+                    OutResult->ExitCode = static_cast<int32>(ExitCode);
+                }
+                OutResult->bCompleted = true;
+                CloseHandle(ShellInfo.hProcess);
+            }
+        }
+        else if (ShellInfo.hProcess)
+        {
+            CloseHandle(ShellInfo.hProcess);
+        }
+
+        return true;
+#else
+        if (OutResult)
+        {
+            OutResult->ErrorMessage = TEXT("Elevated commands are only available on Windows.");
+        }
+        return false;
+#endif
+    }
+
+    static FWNTCommandResult RunCaptured(const FString& Executable, const FString& Parameters, const FWNTCommandOptions& Options)
+    {
+        FWNTCommandResult Result;
+
+        if (Executable.IsEmpty() || Parameters.IsEmpty())
+        {
+            Result.ErrorMessage = TEXT("Command is empty or unsupported on this platform.");
+            return Result;
+        }
+
+        void* ReadPipe = nullptr;
+        void* WritePipe = nullptr;
+        void* StdErrReadPipe = nullptr;
+        void* StdErrWritePipe = nullptr;
+
+        const bool bStdOutPipe = FPlatformProcess::CreatePipe(ReadPipe, WritePipe);
+        const bool bStdErrPipe = FPlatformProcess::CreatePipe(StdErrReadPipe, StdErrWritePipe);
+        if (!bStdOutPipe || !bStdErrPipe)
+        {
+            if (ReadPipe || WritePipe)
+            {
+                FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
+            }
+            if (StdErrReadPipe || StdErrWritePipe)
+            {
+                FPlatformProcess::ClosePipe(StdErrReadPipe, StdErrWritePipe);
+            }
+            Result.ErrorMessage = TEXT("Failed to create output pipes.");
+            return Result;
+        }
+
+        uint32 ProcessId = 0;
+        FProcHandle ProcHandle = FPlatformProcess::CreateProc(
+            *Executable,
+            *Parameters,
+            false,
+            Options.bHidden,
+            Options.bHidden,
+            &ProcessId,
+            0,
+            Options.WorkingDirectory.IsEmpty() ? nullptr : *Options.WorkingDirectory,
+            WritePipe,
+            nullptr,
+            StdErrWritePipe);
+
+        if (!ProcHandle.IsValid())
+        {
+            FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
+            FPlatformProcess::ClosePipe(StdErrReadPipe, StdErrWritePipe);
+            Result.ErrorMessage = TEXT("Failed to start command process.");
+            return Result;
+        }
+
+        Result.bStarted = true;
+        const double StartTime = FPlatformTime::Seconds();
+        while (FPlatformProcess::IsProcRunning(ProcHandle))
+        {
+            Result.StdOut += FPlatformProcess::ReadPipe(ReadPipe);
+            Result.StdErr += FPlatformProcess::ReadPipe(StdErrReadPipe);
+
+            if (Options.TimeoutSeconds > 0.0f && (FPlatformTime::Seconds() - StartTime) >= Options.TimeoutSeconds)
+            {
+                Result.bTimedOut = true;
+                FPlatformProcess::TerminateProc(ProcHandle, true);
+                break;
+            }
+
+            FPlatformProcess::Sleep(0.02f);
+        }
+
+        Result.StdOut += FPlatformProcess::ReadPipe(ReadPipe);
+        Result.StdErr += FPlatformProcess::ReadPipe(StdErrReadPipe);
+
+        if (!Result.bTimedOut)
+        {
+            int32 ReturnCode = -1;
+            if (FPlatformProcess::GetProcReturnCode(ProcHandle, &ReturnCode))
+            {
+                Result.ExitCode = ReturnCode;
+            }
+            Result.bCompleted = true;
+        }
+        else
+        {
+            Result.ErrorMessage = TEXT("Command timed out and was terminated.");
+        }
+
+        FPlatformProcess::CloseProc(ProcHandle);
+        FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
+        FPlatformProcess::ClosePipe(StdErrReadPipe, StdErrWritePipe);
+        return Result;
+    }
+
+    static FWNTCommandResult RunCommand(const FString& Command, FWNTCommandOptions Options)
+    {
+        FWNTCommandResult Result;
+        const FString TrimmedCommand = Command.TrimStartAndEnd();
+        if (TrimmedCommand.IsEmpty())
+        {
+            Result.ErrorMessage = TEXT("Command is empty.");
+            return Result;
+        }
+
+        const FString Executable = GetShellExecutable(Options.Shell);
+        const FString Parameters = BuildShellParameters(Options.Shell, TrimmedCommand);
+        if (Executable.IsEmpty())
+        {
+            Result.ErrorMessage = TEXT("Command execution is only available on Windows.");
+            return Result;
+        }
+
+        if (Options.bRunAsAdmin)
+        {
+            if (Options.bCaptureOutput)
+            {
+                Result.StdErr = TEXT("Output capture is not available for elevated commands launched through UAC.");
+            }
+            StartElevated(Executable, Parameters, Options.bHidden, Options.WorkingDirectory, &Result);
+            return Result;
+        }
+
+        if (Options.bCaptureOutput)
+        {
+            return RunCaptured(Executable, Parameters, Options);
+        }
+
+        uint32 ProcessId = 0;
+        FProcHandle Handle = FPlatformProcess::CreateProc(
+            *Executable,
+            *Parameters,
+            true,
+            Options.bHidden,
+            Options.bHidden,
+            &ProcessId,
+            0,
+            Options.WorkingDirectory.IsEmpty() ? nullptr : *Options.WorkingDirectory,
+            nullptr);
+
+        Result.bStarted = Handle.IsValid();
+        Result.bCompleted = Result.bStarted;
+        Result.ExitCode = Result.bStarted ? 0 : -1;
+        if (Handle.IsValid())
+        {
+            FPlatformProcess::CloseProc(Handle);
+        }
+        else
+        {
+            Result.ErrorMessage = TEXT("Failed to start command process.");
+        }
+
+        return Result;
+    }
+}
+
+void USystemInfoBPLibrary::GetMemoryInfo(
+    int64& TotalPhysicalMB, int64& UsedPhysicalMB, int64& FreePhysicalMB,
     int64& TotalVirtualMB, int64& UsedVirtualMB, int64& FreeVirtualMB)
 {
-    MEMORYSTATUSEX memInfo;
-    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
-
-    if (GlobalMemoryStatusEx(&memInfo))
+#if PLATFORM_WINDOWS
+    MEMORYSTATUSEX MemInfo;
+    MemInfo.dwLength = sizeof(MEMORYSTATUSEX);
+    if (::GlobalMemoryStatusEx(&MemInfo))
     {
-
-        TotalPhysicalMB = static_cast<int64>(memInfo.ullTotalPhys >> 20);
-        FreePhysicalMB = static_cast<int64>(memInfo.ullAvailPhys >> 20);
-        UsedPhysicalMB = TotalPhysicalMB - FreePhysicalMB;
-
-        TotalVirtualMB = static_cast<int64>(memInfo.ullTotalPageFile >> 20);
-        FreeVirtualMB = static_cast<int64>(memInfo.ullAvailPageFile >> 20);
-        UsedVirtualMB = TotalVirtualMB - FreeVirtualMB;
-    }
-    else
-    {
-        TotalPhysicalMB = UsedPhysicalMB = FreePhysicalMB = 0;
-        TotalVirtualMB = UsedVirtualMB = FreeVirtualMB = 0;
-    }
-}
-
-void USystemInfoBPLibrary::GetCPUInfo(FString& DeviceName, ECPUVendor& Vendor, int32& PhysicalCores, int32& LogicalThreads)
-{
-    DeviceName = FPlatformMisc::GetCPUBrand().TrimStartAndEnd();
-
-    if (DeviceName.IsEmpty())
-    {
-        DeviceName = TEXT("Unknown Processor");
-    }
-
-    PhysicalCores = FPlatformMisc::NumberOfCores();
-
-    LogicalThreads = FPlatformMisc::NumberOfCoresIncludingHyperthreads();
-
-    FString VendorString = FPlatformMisc::GetCPUVendor();
-
-    if (VendorString.Equals(TEXT("GenuineIntel"), ESearchCase::IgnoreCase) || DeviceName.Contains(TEXT("Intel")))
-    {
-        Vendor = ECPUVendor::Intel;
-    }
-    else if (VendorString.Equals(TEXT("AuthenticAMD"), ESearchCase::IgnoreCase) || DeviceName.Contains(TEXT("AMD")))
-    {
-        Vendor = ECPUVendor::AMD;
-    }
-    else if (DeviceName.Contains(TEXT("Apple")))
-    {
-        Vendor = ECPUVendor::Apple;
-    }
-    else if (DeviceName.Contains(TEXT("Snapdragon")) || DeviceName.Contains(TEXT("Qualcomm")))
-    {
-        Vendor = ECPUVendor::Qualcomm;
-    }
-    else
-    {
-        Vendor = ECPUVendor::Generic;
-    }
-}
-
-void USystemInfoBPLibrary::GetGPUInfo(FString& Name, FString& Manufacturer, int32& TotalVRAMMB, int32& UsedVRAMMB, int32& FreeVRAMMB)
-{
-    Name = TEXT("Unknown");
-    Manufacturer = TEXT("Unknown");
-    TotalVRAMMB = 0;
-    UsedVRAMMB = 0;
-    FreeVRAMMB = 0;
-
-    IDXGIFactory* pFactory = nullptr;
-    if (FAILED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&pFactory)))
-    {
+        TotalPhysicalMB = static_cast<int64>(MemInfo.ullTotalPhys >> 20);
+        FreePhysicalMB  = static_cast<int64>(MemInfo.ullAvailPhys >> 20);
+        UsedPhysicalMB  = TotalPhysicalMB - FreePhysicalMB;
+        TotalVirtualMB  = static_cast<int64>(MemInfo.ullTotalPageFile >> 20);
+        FreeVirtualMB   = static_cast<int64>(MemInfo.ullAvailPageFile >> 20);
+        UsedVirtualMB   = TotalVirtualMB - FreeVirtualMB;
         return;
     }
-    IDXGIAdapter* pAdapter = nullptr;
-    if (SUCCEEDED(pFactory->EnumAdapters(0, &pAdapter)))
-    {
-        DXGI_ADAPTER_DESC desc;
-        if (SUCCEEDED(pAdapter->GetDesc(&desc)))
-        {
-            Name = FString(desc.Description);
-            TotalVRAMMB = static_cast<int32>(desc.DedicatedVideoMemory >> 20);
-            switch (desc.VendorId)
-            {
-            case 0x10DE: Manufacturer = TEXT("NVIDIA"); break;
-            case 0x1002: Manufacturer = TEXT("AMD"); break;
-            case 0x8086: Manufacturer = TEXT("Intel"); break;
-            case 0x1414: Manufacturer = TEXT("Microsoft"); break;
-            default: Manufacturer = TEXT("Unknown"); break;
-            }
-            IDXGIAdapter3* pAdapter3 = nullptr;
-            if (SUCCEEDED(pAdapter->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&pAdapter3)))
-            {
-                DXGI_QUERY_VIDEO_MEMORY_INFO memoryInfo;
-                if (SUCCEEDED(pAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memoryInfo)))
-                {
-                    UsedVRAMMB = static_cast<int32>(memoryInfo.CurrentUsage >> 20);
-                    FreeVRAMMB = TotalVRAMMB - UsedVRAMMB;
-                }
-                pAdapter3->Release();
-            }
-        }
-        pAdapter->Release();
-    }
-    pFactory->Release();
+#endif
+    TotalPhysicalMB = UsedPhysicalMB = FreePhysicalMB = 0;
+    TotalVirtualMB  = UsedVirtualMB  = FreeVirtualMB  = 0;
 }
 
-void USystemInfoBPLibrary::GetGPUNameAndManufacturer(FString& DeviceName, EGPUVendor& Manufacturer)
+
+
+
+
+void USystemInfoBPLibrary::GetCPUInfo(
+    FString& DeviceName, ECPUVendor& Vendor,
+    int32& PhysicalCores, int32& LogicalThreads)
 {
-    DeviceName = GRHIAdapterName;
+    DeviceName = FPlatformMisc::GetCPUBrand().TrimStartAndEnd();
+    if (DeviceName.IsEmpty()) DeviceName = TEXT("Unknown Processor");
 
-    if (DeviceName.IsEmpty())
-    {
-        DeviceName = TEXT("Unknown Graphics Adapter");
-    }
+    PhysicalCores  = FPlatformMisc::NumberOfCores();
+    LogicalThreads = FPlatformMisc::NumberOfCoresIncludingHyperthreads();
 
-    const uint32 VendorId = GRHIVendorId;
-
-    switch (VendorId)
-    {
-    case 0x10DE:
-        Manufacturer = EGPUVendor::Nvidia;
-        break;
-
-    case 0x1002:
-        Manufacturer = EGPUVendor::AMD;
-        break;
-
-    case 0x8086:
-        Manufacturer = EGPUVendor::Intel;
-        break;
-
-    case 0x5143:
-        Manufacturer = EGPUVendor::Qualcomm;
-        break;
-
-    default:
-        Manufacturer = EGPUVendor::Unknown;
-        break;
-    }
+    const FString VendorId = FPlatformMisc::GetCPUVendor();
+    if (VendorId.Equals(TEXT("GenuineIntel"), ESearchCase::IgnoreCase) || DeviceName.Contains(TEXT("Intel")))
+        Vendor = ECPUVendor::Intel;
+    else if (VendorId.Equals(TEXT("AuthenticAMD"), ESearchCase::IgnoreCase) || DeviceName.Contains(TEXT("AMD")))
+        Vendor = ECPUVendor::AMD;
+    else if (DeviceName.Contains(TEXT("Apple")))
+        Vendor = ECPUVendor::Apple;
+    else if (DeviceName.Contains(TEXT("Snapdragon")) || DeviceName.Contains(TEXT("Qualcomm")))
+        Vendor = ECPUVendor::Qualcomm;
+    else
+        Vendor = ECPUVendor::Generic;
 }
 
-int32 USystemInfoBPLibrary::GetTotalVRAMMB()
+float USystemInfoBPLibrary::GetCPUUsagePercent()
 {
 #if PLATFORM_WINDOWS
-    static int32 CachedTotalVRAM = -1;
-
-    static FCriticalSection VRAMCacheMutex;
-    FScopeLock Lock(&VRAMCacheMutex);
-
-    if (CachedTotalVRAM < 0)
+    FScopeLock Lock(&WNT_Private::PerfMutex);
+    if (WNT_Private::InitPerfCounters() && WNT_Private::CPUCounter)
     {
-        int32 Budget, Usage;
-        int32 TempTotal = 0;
+        WNT_Private::CollectPerfData();
 
-        if (QueryGPUStats(TempTotal, Budget, Usage))
+        PDH_FMT_COUNTERVALUE Val;
+        if (::PdhGetFormattedCounterValue(WNT_Private::CPUCounter, PDH_FMT_DOUBLE, nullptr, &Val) == ERROR_SUCCESS)
         {
-            CachedTotalVRAM = TempTotal;
+            return static_cast<float>(FMath::Clamp(Val.doubleValue, 0.0, 100.0));
         }
     }
+#endif
+    return 0.0f;
+}
 
-    return (CachedTotalVRAM < 0) ? 0 : CachedTotalVRAM;
+
+
+
+
+TArray<FGPUAdapterInfo> USystemInfoBPLibrary::GetAllGPUAdapters()
+{
+    TArray<FGPUAdapterInfo> Result;
+#if PLATFORM_WINDOWS
+    FScopeLock Lock(&WNT_Private::CacheMutex);
+    WNT_Private::EnumerateAdapters();
+
+    Result.Reserve(WNT_Private::CachedAdapters.Num());
+    for (const auto& Entry : WNT_Private::CachedAdapters)
+    {
+        FGPUAdapterInfo Info;
+        Info.AdapterIndex = Entry.Index;
+        Info.AdapterName = FString(Entry.Desc.Description);
+        Info.Vendor = WNT_Private::VendorIdToEnum(Entry.Desc.VendorId);
+        Info.DedicatedVideoMemoryMB = static_cast<int64>(Entry.Desc.DedicatedVideoMemory >> 20);
+        Info.SharedSystemMemoryMB = static_cast<int64>(Entry.Desc.SharedSystemMemory >> 20);
+        Info.bIsActiveRHI = Entry.bIsActiveRHI;
+        Result.Add(MoveTemp(Info));
+    }
+#endif
+    return Result;
+}
+
+FGPUAdapterRuntimeInfo USystemInfoBPLibrary::GetGPUAdapterRuntimeInfo(int32 Adapter)
+{
+    FGPUAdapterRuntimeInfo Result;
+#if PLATFORM_WINDOWS
+    if (auto* Entry = WNT_Private::GetAdapter(Adapter))
+    {
+        Result.bSuccess = true;
+        Result.AdapterInfo.AdapterIndex = Entry->Index;
+        Result.AdapterInfo.AdapterName = FString(Entry->Desc.Description);
+        Result.AdapterInfo.Vendor = WNT_Private::VendorIdToEnum(Entry->Desc.VendorId);
+        Result.AdapterInfo.DedicatedVideoMemoryMB = static_cast<int64>(Entry->Desc.DedicatedVideoMemory >> 20);
+        Result.AdapterInfo.SharedSystemMemoryMB = static_cast<int64>(Entry->Desc.SharedSystemMemory >> 20);
+        Result.AdapterInfo.bIsActiveRHI = Entry->bIsActiveRHI;
+        Result.UsedDedicatedVRAMMB = GetUsedDedicatedVRAM(Adapter);
+        Result.UsedSharedVRAMMB = GetUsedVirtualVRAM(Adapter);
+        Result.GameVRAMUsageMB = Entry->bIsActiveRHI ? GetGameVRAMUsage() : 0;
+        Result.UsagePercent = GetGPUUsagePercent(Adapter);
+    }
+    else
+    {
+        Result.ErrorMessage = TEXT("GPU adapter index is invalid.");
+    }
+#else
+    Result.ErrorMessage = TEXT("GPU runtime information is only available on Windows.");
+#endif
+    return Result;
+}
+
+FString USystemInfoBPLibrary::GetGPUName(int32 Adapter)
+{
+#if PLATFORM_WINDOWS
+    if (auto* Entry = WNT_Private::GetAdapter(Adapter))
+    {
+        return FString(Entry->Desc.Description);
+    }
+#endif
+    return TEXT("Unknown Graphics Adapter");
+}
+
+EGPUVendor USystemInfoBPLibrary::GetGPUManufacturer(int32 Adapter)
+{
+#if PLATFORM_WINDOWS
+    if (auto* Entry = WNT_Private::GetAdapter(Adapter))
+    {
+        return WNT_Private::VendorIdToEnum(Entry->Desc.VendorId);
+    }
+#endif
+    return EGPUVendor::Unknown;
+}
+
+
+
+
+
+int64 USystemInfoBPLibrary::GetTotalDedicatedVRAM(int32 Context)
+{
+#if PLATFORM_WINDOWS
+    if (auto* Entry = WNT_Private::GetAdapter(Context))
+    {
+        return static_cast<int64>(Entry->Desc.DedicatedVideoMemory >> 20);
+    }
+#endif
+    return 0;
+}
+
+int64 USystemInfoBPLibrary::GetUsedDedicatedVRAM(int32 Context)
+{
+#if PLATFORM_WINDOWS
+    FScopeLock Lock(&WNT_Private::PerfMutex);
+    if (!WNT_Private::InitPerfCounters()) return 0;
+
+    auto* Entry = WNT_Private::GetAdapter(Context);
+    if (!Entry) return 0;
+
+    WNT_Private::CollectPerfData();
+    const FString LuidStr = WNT_Private::FormatLUID(Entry->Desc.AdapterLuid);
+    return WNT_Private::QueryCounterForLUID(WNT_Private::DedicatedCounter, LuidStr) >> 20;
 #else
     return 0;
 #endif
 }
 
-int32 USystemInfoBPLibrary::GetGameVRAMUsageMB()
+
+
+
+
+int64 USystemInfoBPLibrary::GetTotalVirtualVRAM(int32 Context)
 {
 #if PLATFORM_WINDOWS
-    int32 Total, Budget, Usage;
-    if (QueryGPUStats(Total, Budget, Usage))
+    if (auto* Entry = WNT_Private::GetAdapter(Context))
     {
-        return Usage;
+        return static_cast<int64>(Entry->Desc.SharedSystemMemory >> 20);
     }
 #endif
     return 0;
 }
 
-int32 USystemInfoBPLibrary::GetUsedVRAMMB()
+int64 USystemInfoBPLibrary::GetUsedVirtualVRAM(int32 Context)
 {
 #if PLATFORM_WINDOWS
-    int32 Total, Budget, Usage;
-    if (QueryGPUStats(Total, Budget, Usage))
+    FScopeLock Lock(&WNT_Private::PerfMutex);
+    if (!WNT_Private::InitPerfCounters()) return 0;
+
+    auto* Entry = WNT_Private::GetAdapter(Context);
+    if (!Entry) return 0;
+
+    WNT_Private::CollectPerfData();
+    const FString LuidStr = WNT_Private::FormatLUID(Entry->Desc.AdapterLuid);
+    return WNT_Private::QueryCounterForLUID(WNT_Private::SharedCounter, LuidStr) >> 20;
+#else
+    return 0;
+#endif
+}
+
+
+
+
+
+int64 USystemInfoBPLibrary::GetGameVRAMUsage()
+{
+#if PLATFORM_WINDOWS
+    auto* Entry = WNT_Private::GetRHIAdapter();
+    if (Entry && Entry->Adapter)
     {
-
-        int32 SystemOverhead = Total - Budget;
-        int32 GlobalUsed = SystemOverhead + Usage;
-
-        return FMath::Clamp(GlobalUsed, 0, Total);
+        DXGI_QUERY_VIDEO_MEMORY_INFO MemInfo;
+        if (SUCCEEDED(Entry->Adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &MemInfo)))
+        {
+            return static_cast<int64>(MemInfo.CurrentUsage >> 20);
+        }
     }
 #endif
     return 0;
 }
+
+
+
+
+
+float USystemInfoBPLibrary::GetGPUUsagePercent(int32 Adapter)
+{
+#if PLATFORM_WINDOWS
+    FScopeLock Lock(&WNT_Private::PerfMutex);
+    if (!WNT_Private::InitPerfCounters()) return 0.0f;
+
+    auto* Entry = WNT_Private::GetAdapter(Adapter);
+    if (!Entry) return 0.0f;
+
+    WNT_Private::CollectPerfData();
+    const FString LuidStr = WNT_Private::FormatLUID(Entry->Desc.AdapterLuid);
+    return WNT_Private::QueryGPUUtil(LuidStr);
+#else
+    return 0.0f;
+#endif
+}
+
+
+
+
 
 void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, bool& HasKeyboard)
 {
-    UINT nDevices = 0;
-
-    GetRawInputDeviceList(NULL, &nDevices, sizeof(RAWINPUTDEVICELIST));
-
-    if (nDevices == 0)
+    HasGamepad = false; HasMouse = false; HasKeyboard = false;
+#if PLATFORM_WINDOWS
+    UINT DeviceCount = 0;
+    if (::GetRawInputDeviceList(nullptr, &DeviceCount, sizeof(RAWINPUTDEVICELIST)) != static_cast<UINT>(-1) && DeviceCount > 0)
     {
-        HasMouse = false;
-        HasKeyboard = false;
-    }
-    else
-    {
-
-        TArray<RAWINPUTDEVICELIST> DeviceList;
-        DeviceList.SetNumUninitialized(nDevices);
-
-
-        GetRawInputDeviceList(DeviceList.GetData(), &nDevices, sizeof(RAWINPUTDEVICELIST));
-
-        HasMouse = false;
-        HasKeyboard = false;
-
-        for (UINT i = 0; i < nDevices; i++)
+        TArray<RAWINPUTDEVICELIST> Devices;
+        Devices.SetNumUninitialized(DeviceCount);
+        const UINT Result = ::GetRawInputDeviceList(Devices.GetData(), &DeviceCount, sizeof(RAWINPUTDEVICELIST));
+        if (Result != static_cast<UINT>(-1))
         {
-            if (DeviceList[i].dwType == RIM_TYPEMOUSE)
+            for (UINT i = 0; i < Result; ++i)
             {
-
-                HasMouse = true;
-            }
-            else if (DeviceList[i].dwType == RIM_TYPEKEYBOARD)
-            {
-                HasKeyboard = true;
+                if (Devices[i].dwType == RIM_TYPEMOUSE) HasMouse = true;
+                else if (Devices[i].dwType == RIM_TYPEKEYBOARD) HasKeyboard = true;
             }
         }
     }
-    HasGamepad = false;
-
-    for (DWORD i = 0; i < XUSER_MAX_COUNT; i++)
+    for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i)
     {
-        XINPUT_STATE State;
-        ZeroMemory(&State, sizeof(XINPUT_STATE));
-
-        if (XInputGetState(i, &State) == ERROR_SUCCESS)
-        {
-            HasGamepad = true;
-            break; // Found at least one controller
-        }
+        XINPUT_STATE State = {};
+        if (::XInputGetState(i, &State) == ERROR_SUCCESS) { HasGamepad = true; break; }
     }
-
-    // NOTE: This still only finds XInput (Xbox) devices. 
-    // To find PlayStation (DirectInput) controllers without Steam/DS4Windows, 
-    // you would need to parse the RawInput list above for HID devices with "Joystick" usage pages.
+#endif
 }
+
+
+
+
 
 EGraphicsRHI USystemInfoBPLibrary::GetRHIName()
 {
-
-    if (!GDynamicRHI)
-    {
-        return EGraphicsRHI::Unknown;
-    }
-
-
-    FString RHIName = FString(GDynamicRHI->GetName());
-
-
-    if (RHIName == TEXT("D3D12"))           return EGraphicsRHI::DirectX12;
-    if (RHIName == TEXT("D3D11"))           return EGraphicsRHI::DirectX11;
-    if (RHIName.StartsWith(TEXT("Vulkan"))) return EGraphicsRHI::Vulkan;
-    if (RHIName == TEXT("Metal"))           return EGraphicsRHI::Metal;
-    if (RHIName.Contains(TEXT("OpenGL")))   return EGraphicsRHI::OpenGL;
-
+    if (!GDynamicRHI) return EGraphicsRHI::Unknown;
+    const FString RHIName = FString(GDynamicRHI->GetName());
+    if (RHIName == TEXT("D3D12"))             return EGraphicsRHI::DirectX12;
+    if (RHIName == TEXT("D3D11"))             return EGraphicsRHI::DirectX11;
+    if (RHIName.StartsWith(TEXT("Vulkan")))   return EGraphicsRHI::Vulkan;
+    if (RHIName == TEXT("Metal"))             return EGraphicsRHI::Metal;
+    if (RHIName.Contains(TEXT("OpenGL")))     return EGraphicsRHI::OpenGL;
     return EGraphicsRHI::Unknown;
+}
+
+bool USystemInfoBPLibrary::CanRestartGame()
+{
+    if (IsRunningCommandlet())
+    {
+        return false;
+    }
+#if WITH_EDITOR
+    if (GIsEditor)
+    {
+        return false;
+    }
+#endif
+    return FPlatformProcess::ExecutablePath() && FCString::Strlen(FPlatformProcess::ExecutablePath()) > 0;
 }
 
 void USystemInfoBPLibrary::RestartGameWithCommandLine(const FString& ExtraCommandLine)
 {
 #if PLATFORM_WINDOWS
+    if (!CanRestartGame())
+    {
+        return;
+    }
+
     static bool bIsRestarting = false;
-    if (bIsRestarting) { return; }
+    if (bIsRestarting) return;
 
     const FString RestartSentinel = TEXT("--restarted");
-    if (ExtraCommandLine.Contains(RestartSentinel, ESearchCase::IgnoreCase)) { return; }
+    if (ExtraCommandLine.Contains(RestartSentinel, ESearchCase::IgnoreCase)) return;
 
     FString Sanitized;
     Sanitized.Reserve(ExtraCommandLine.Len());
-    for (TCHAR C : ExtraCommandLine)
+    for (const TCHAR C : ExtraCommandLine)
     {
         if (FChar::IsAlpha(C) || FChar::IsDigit(C) ||
             C == TEXT(' ') || C == TEXT('-') || C == TEXT('_') ||
             C == TEXT('=') || C == TEXT(':') || C == TEXT('/') ||
             C == TEXT('\\') || C == TEXT('.') || C == TEXT(','))
-        {
             Sanitized.AppendChar(C);
-        }
         else
-        {
             Sanitized.AppendChar(TEXT(' '));
-        }
     }
+    Sanitized.TrimEndInline();
 
-    FString CmdLine = Sanitized;
-    if (!CmdLine.IsEmpty())
-    {
-        CmdLine.TrimEndInline();
-        CmdLine += TEXT(" ");
-    }
-
+    FString CmdLine;
+    if (!Sanitized.IsEmpty()) CmdLine = Sanitized + TEXT(" ");
     CmdLine += RestartSentinel;
     bIsRestarting = true;
 
     FCoreDelegates::OnPreExit.Broadcast();
-    if (GConfig) { GConfig->Flush(false, GEngineIni); }
+    if (GConfig) GConfig->Flush(false, GEngineIni);
 
     const FString ExePath = FPlatformProcess::ExecutablePath();
-    if (ExePath.IsEmpty())
-    {
-        bIsRestarting = false;
-        return;
-    }
+    if (ExePath.IsEmpty()) { bIsRestarting = false; return; }
 
-    FProcHandle ProcHandle = FPlatformProcess::CreateProc(*ExePath, *CmdLine, true, false, false, nullptr, 0, nullptr, nullptr);
-    if (!ProcHandle.IsValid())
-    {
-        bIsRestarting = false;
-        return;
-    }
+    FProcHandle ProcHandle = FPlatformProcess::CreateProc(
+        *ExePath, *CmdLine, true, false, false, nullptr, 0, nullptr, nullptr);
+    if (!ProcHandle.IsValid()) { bIsRestarting = false; return; }
 
+    constexpr double TimeoutSeconds = 5.0;
     const double StartTime = FPlatformTime::Seconds();
-    const double TimeoutSeconds = 5.0;
     bool bChildRunning = false;
-
     while ((FPlatformTime::Seconds() - StartTime) < TimeoutSeconds)
     {
-        if (FPlatformProcess::IsProcRunning(ProcHandle))
-        {
-            bChildRunning = true;
-            break;
-        }
+        if (FPlatformProcess::IsProcRunning(ProcHandle)) { bChildRunning = true; break; }
         FPlatformProcess::Sleep(0.05f);
     }
-
-    if (bChildRunning)
-    {
-        FPlatformProcess::CloseProc(ProcHandle);
-        FPlatformMisc::RequestExit(true);
-        return;
-    }
-
     FPlatformProcess::CloseProc(ProcHandle);
-    bIsRestarting = false;
+    if (bChildRunning) FPlatformMisc::RequestExit(true);
+    else bIsRestarting = false;
 #endif
 }
 
 bool USystemInfoBPLibrary::ExecuteWindowsCMD(const FString& Command, bool bRunAsAdmin, bool bHidden)
 {
-    if (Command.IsEmpty()) return false;
+    FWNTCommandOptions Options;
+    Options.Shell = EWNTCommandShell::Cmd;
+    Options.bRunAsAdmin = bRunAsAdmin;
+    Options.bHidden = bHidden;
+    Options.bCaptureOutput = false;
+    return WNT_Command::RunCommand(Command, Options).bStarted;
+}
 
-    const FString Params = FString::Printf(TEXT("/c \"%s\""), *Command);
+bool USystemInfoBPLibrary::ExecutePowerShell(const FString& Command, bool bRunAsAdmin, bool bHidden)
+{
+    FWNTCommandOptions Options;
+    Options.Shell = EWNTCommandShell::PowerShell;
+    Options.bRunAsAdmin = bRunAsAdmin;
+    Options.bHidden = bHidden;
+    Options.bCaptureOutput = false;
+    return WNT_Command::RunCommand(Command, Options).bStarted;
+}
 
-#if PLATFORM_WINDOWS
-    if (bRunAsAdmin)
+void USystemInfoBPLibrary::RunCommandAsync(const FString& Command, FWNTCommandOptions Options, FOnWNTCommandResult OnResult)
+{
+    Async(EAsyncExecution::Thread, [Command, Options, OnResult]()
     {
-        SHELLEXECUTEINFO ShExecInfo = { 0 };
-        ShExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
-        ShExecInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
-        ShExecInfo.hwnd = NULL;
-        ShExecInfo.lpVerb = TEXT("runas");
-        ShExecInfo.lpFile = TEXT("cmd.exe");
-        ShExecInfo.lpParameters = *Params;
-        ShExecInfo.lpDirectory = NULL;
-        ShExecInfo.nShow = bHidden ? SW_HIDE : SW_SHOW;
+        const FWNTCommandResult Result = WNT_Command::RunCommand(Command, Options);
+        AsyncTask(ENamedThreads::GameThread, [OnResult, Result]()
+        {
+            OnResult.ExecuteIfBound(Result);
+        });
+    });
+}
 
-        return ShellExecuteEx(&ShExecInfo);
-    }
-    else
+bool USystemInfoBPLibrary::CanForceKillGame()
+{
+    if (IsRunningCommandlet())
     {
-
-        FProcHandle Handle = FPlatformProcess::CreateProc(
-            TEXT("cmd.exe"), 
-            *Params,        
-            true,       
-            bHidden,       
-            bHidden,      
-            nullptr,     
-            0,          
-            nullptr,  
-            nullptr      
-
-        );
-
-        return Handle.IsValid();
+        return false;
     }
-#else
-    return false;
+#if WITH_EDITOR
+    if (GIsEditor)
+    {
+        return false;
+    }
 #endif
+    return true;
 }
 
 void USystemInfoBPLibrary::ForceKillGame()
 {
-#if PLATFORM_WINDOWS
+    if (!CanForceKillGame())
+    {
+        return;
+    }
 
-    HANDLE hProcess = GetCurrentProcess();
-    TerminateProcess(hProcess, 0);
+#if PLATFORM_WINDOWS
+    ::TerminateProcess(::GetCurrentProcess(), 0);
 #else
     FPlatformMisc::RequestExit(true);
 #endif
 }
+
+

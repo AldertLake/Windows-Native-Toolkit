@@ -1,12 +1,12 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
-//To reduce junk, You can delete this whole module (EditorOnly). It has only logic for rating
-//MessageBox, delete the EditorOnly folder inside plugin source & remove the module from the .uplugin file.
-//This will not be packaged in your game automaticaly so don't worry about it if you didnt remove it.
+
+
+
 
 #include "EditorOnly.h"
 
@@ -26,7 +26,7 @@ namespace
 	FString EnsureConfigFile(const FString& FileName)
 	{
 		const FString Dir = FPaths::ProjectConfigDir();
-		IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/ true);
+		IFileManager::Get().MakeDirectory(*Dir,  true);
 		FString FullPath = Dir / FileName;
 		FullPath = FullPath.Replace(TEXT("\\"), TEXT("/"));
 		return FullPath;
@@ -145,3 +145,5 @@ void FEditorOnlyModule::ShutdownModule()
 }
 #undef LOCTEXT_NAMESPACE
 IMPLEMENT_MODULE(FEditorOnlyModule, EditorOnly)
+
+

@@ -1,14 +1,16 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #pragma once
 
+#include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "HardwareInfoLibrary.generated.h"
 
+/** Rendering hardware interfaces that Unreal may currently use. */
 UENUM(BlueprintType)
 enum class EGraphicsRHI : uint8
 {
@@ -20,6 +22,7 @@ enum class EGraphicsRHI : uint8
     OpenGL      UMETA(DisplayName = "OpenGL")
 };
 
+/** Hardware GPU vendors recognized by the toolkit. */
 UENUM(BlueprintType)
 enum class EGPUVendor : uint8
 {
@@ -30,6 +33,7 @@ enum class EGPUVendor : uint8
     Qualcomm    UMETA(DisplayName = "Qualcomm")
 };
 
+/** CPU vendors recognized by the toolkit. */
 UENUM(BlueprintType)
 enum class ECPUVendor : uint8
 {
@@ -41,6 +45,149 @@ enum class ECPUVendor : uint8
     Generic     UMETA(DisplayName = "Generic")
 };
 
+/** Static information about one GPU adapter installed in the system. */
+USTRUCT(BlueprintType)
+struct FGPUAdapterInfo
+{
+    GENERATED_BODY()
+
+    /** Zero-based adapter index used by GPU query functions. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    int32 AdapterIndex = -1;
+
+    /** Friendly GPU adapter name reported by the display driver. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    FString AdapterName;
+
+    /** GPU hardware vendor. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    EGPUVendor Vendor = EGPUVendor::Unknown;
+
+    /** Total dedicated video memory in megabytes. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    int64 DedicatedVideoMemoryMB = 0;
+
+    /** Total shared system memory available to this adapter in megabytes. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    int64 SharedSystemMemoryMB = 0;
+
+    /** True if Unreal Engine is actively rendering with this adapter. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    bool bIsActiveRHI = false;
+};
+
+/** Runtime usage metrics and status for one GPU adapter. */
+USTRUCT(BlueprintType)
+struct FGPUAdapterRuntimeInfo
+{
+    GENERATED_BODY()
+
+    /** True when the runtime query completed successfully. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    bool bSuccess = false;
+
+    /** Readable error when bSuccess is false. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    FString ErrorMessage;
+
+    /** Static adapter information such as name, vendor, and totals. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    FGPUAdapterInfo AdapterInfo;
+
+    /** Dedicated VRAM currently used by the system for this adapter, in megabytes. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    int64 UsedDedicatedVRAMMB = 0;
+
+    /** Shared GPU memory currently used by the system for this adapter, in megabytes. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    int64 UsedSharedVRAMMB = 0;
+
+    /** VRAM committed by the current Unreal process when this is the active RHI adapter, in megabytes. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    int64 GameVRAMUsageMB = 0;
+
+    /** Current adapter utilization from Windows performance counters, from 0 to 100. */
+    UPROPERTY(BlueprintReadOnly, Category = "GPU")
+    float UsagePercent = 0.0f;
+};
+
+/** Chooses which Windows shell should run a command. */
+UENUM(BlueprintType)
+enum class EWNTCommandShell : uint8
+{
+    Cmd UMETA(DisplayName = "Command Prompt"),
+    PowerShell UMETA(DisplayName = "PowerShell")
+};
+
+/** Options that control how a command prompt or PowerShell process starts. */
+USTRUCT(BlueprintType)
+struct FWNTCommandOptions
+{
+    GENERATED_BODY()
+
+    /** Selects cmd.exe or powershell.exe. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+    EWNTCommandShell Shell = EWNTCommandShell::Cmd;
+
+    /** Requests elevation through UAC. Elevated commands cannot capture output silently. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+    bool bRunAsAdmin = false;
+
+    /** Hides the command window when Windows allows it. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+    bool bHidden = true;
+
+    /** Captures standard output and standard error for non-admin commands. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+    bool bCaptureOutput = true;
+
+    /** Maximum run time in seconds for captured async commands. Zero disables timeout. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+    float TimeoutSeconds = 0.0f;
+
+    /** Optional working directory for the command process. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+    FString WorkingDirectory;
+};
+
+/** Result payload returned by asynchronous command execution. */
+USTRUCT(BlueprintType)
+struct FWNTCommandResult
+{
+    GENERATED_BODY()
+
+    /** True when the command process started successfully. */
+    UPROPERTY(BlueprintReadOnly, Category = "Command")
+    bool bStarted = false;
+
+    /** True when the command finished before timeout or cancellation. */
+    UPROPERTY(BlueprintReadOnly, Category = "Command")
+    bool bCompleted = false;
+
+    /** True when the command exceeded TimeoutSeconds and was terminated. */
+    UPROPERTY(BlueprintReadOnly, Category = "Command")
+    bool bTimedOut = false;
+
+    /** Process exit code when it is available. */
+    UPROPERTY(BlueprintReadOnly, Category = "Command")
+    int32 ExitCode = -1;
+
+    /** Captured standard output for non-admin commands. */
+    UPROPERTY(BlueprintReadOnly, Category = "Command")
+    FString StdOut;
+
+    /** Captured standard error or diagnostic details. */
+    UPROPERTY(BlueprintReadOnly, Category = "Command")
+    FString StdErr;
+
+    /** Readable failure reason when the command cannot start or complete. */
+    UPROPERTY(BlueprintReadOnly, Category = "Command")
+    FString ErrorMessage;
+};
+
+DECLARE_DYNAMIC_DELEGATE_OneParam(FOnWNTCommandResult, FWNTCommandResult, Result);
+
+/** Native Windows hardware, command, and process helper nodes for Blueprints. */
 UCLASS()
 class DEVICEFRAMEWORKMODULE_API USystemInfoBPLibrary : public UBlueprintFunctionLibrary
 {
@@ -48,77 +195,92 @@ class DEVICEFRAMEWORKMODULE_API USystemInfoBPLibrary : public UBlueprintFunction
 
 public:
 
-    // --- Functions Related To Hardware Inforamtions
-
-    // Retrieves memory information in megabytes for both physical memory & virtual memory (committed).
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get Memory Values In Meagbyte"))
+    /** Retrieves memory information in megabytes for physical memory and committed virtual memory. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get Memory Info (MB)"))
     static void GetMemoryInfo(int64& TotalPhysicalMB, int64& UsedPhysicalMB, int64& FreePhysicalMB, int64& TotalVirtualMB, int64& UsedVirtualMB, int64& FreeVirtualMB);
 
-    // Retrieves CPU details: name, manufacturer, core count, and thread count
-    //This can work in platforms other than windows but recommanded to use only in windows since the plugin support
-    //Only windwos paltform.
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get CPU Informations"))
+    /** Retrieves CPU brand, vendor, physical core count, and logical thread count. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get CPU Info"))
     static void GetCPUInfo(FString& DeviceName, ECPUVendor& Vendor, int32& PhysicalCores, int32& LogicalThreads);
 
-    // Get VGA Name & Manufacturer Name If supported by the function.
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get GPU Name & Manufacturer"))
-    static void GetGPUNameAndManufacturer(FString& DeviceName, EGPUVendor& Manufacturer);
+    /** Returns current system-wide CPU utilization from 0 to 100. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get CPU Usage Percent"))
+    static float GetCPUUsagePercent();
 
-    // Return the total dedicated video memory of the user video graphics adapter.
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get Total VRAM In MB"))
-    static int32 GetTotalVRAMMB();
+    /** Returns all hardware GPU adapters installed in the system. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get All GPU Adapters"))
+    static TArray<FGPUAdapterInfo> GetAllGPUAdapters();
 
-    // Return The Overall Video memory amount used by the whole system including the game in MB.
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get Overall VRAM Usage In MB"))
-    static int32 GetUsedVRAMMB();
+    /** Returns one complete runtime GPU snapshot for a specific adapter. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get GPU Runtime Info"))
+    static FGPUAdapterRuntimeInfo GetGPUAdapterRuntimeInfo(int32 Adapter);
 
-    // Return the video memory amount used by the game process in MB.
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get Game VRAM Usage In MB"))
-    static int32 GetGameVRAMUsageMB();
+    /** Retrieves the GPU adapter name for a specific adapter. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get GPU Name"))
+    static FString GetGPUName(int32 Adapter);
 
-    //Performs an accurate check for physically connected input devices on Windows.
-    //Note that it has some limitation such as keyboard detection will always return true.
-    //since windows has virtual keybaords.
+    /** Retrieves the GPU vendor for a specific adapter. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get GPU Manufacturer"))
+    static EGPUVendor GetGPUManufacturer(int32 Adapter);
+
+    /** Returns total dedicated GPU memory for an adapter in megabytes. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get Total Dedicated VRAM"))
+    static int64 GetTotalDedicatedVRAM(int32 Context);
+
+    /** Returns dedicated GPU memory usage for an adapter in megabytes. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get Used Dedicated VRAM"))
+    static int64 GetUsedDedicatedVRAM(int32 Context);
+
+    /** Returns total shared GPU memory for an adapter in megabytes. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get Total Shared VRAM"))
+    static int64 GetTotalVirtualVRAM(int32 Context);
+
+    /** Returns shared GPU memory usage for an adapter in megabytes. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get Used Shared VRAM"))
+    static int64 GetUsedVirtualVRAM(int32 Context);
+
+    /** Returns VRAM committed by the current Unreal process in megabytes. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get Game VRAM Usage"))
+    static int64 GetGameVRAMUsage();
+
+    /** Returns current GPU utilization for a specific adapter from 0 to 100. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|GPU", meta = (DisplayName = "Get GPU Usage Percent"))
+    static float GetGPUUsagePercent(int32 Adapter);
+
+    /** Checks for physically connected gamepad, mouse, and keyboard devices. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Check Connected Input Devices"))
     static void GetInputDevices(bool& HasGamepad, bool& HasMouse, bool& HasKeyboard);
-    
-    // Returns The Active Hardware Rendering Interface's Name (e.g., "D3D11", "D3D12", "Vulkan")
+
+    /** Returns the active Unreal rendering hardware interface. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DisplayName = "Get Active RHI"))
     static EGraphicsRHI GetRHIName();
 
+    /** Returns true when relaunching the current executable is safe in this runtime context. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Can Relaunch Game"))
+    static bool CanRestartGame();
 
-
-    // --- Function Related To Process Management
-
-    //Will Restart Game - Don't ever let the ExtraCommandLine empty. just put -Restart if you have to extrancommandline.
-    //Note : This will crash the editor so please run it only in packaged relase & not in any kind of editor run.
-    //I did not add an #if WITH_EDITOR just so your editor crash & you learn to read descreption.
-    //Do not use it in editor isnt that clear ?!!!!
-    //You know what i want to say...right?..Editor=No
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Relaunch The Game"))
+    /** Relaunches the packaged game executable with optional command-line arguments. Refuses to run in editor. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Relaunch Game"))
     static void RestartGameWithCommandLine(const FString& ExtraCommandLine);
 
-    //This is used to execute a CMD command, you can even execute commands that require admin but
-    //Player must allow you to do so. trying to bypass the UAC will result in game flagged as virus.
-    //If UAC is set to never notify then bingo, you can play around & execute whatever you like without notifying user.
-    //In most cases the Hidden bool do nothing since in most windwos builds the window of CMD will be hidden by default.
-    //Do not harm players devices with bad commands, be civile don't be an asshole.
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Execute Windows Command"))
+    /** Executes a cmd.exe command. Hidden mode avoids opening a command window for normal non-admin commands. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Run Command Prompt Command"))
     static bool ExecuteWindowsCMD(const FString& Command, bool bRunAsAdmin, bool bHidden);
 
-    //Like the size said this function will force kill your beatiful game (i always spell the last word wrong smh).
-    //NOTE : Do not use this in editor because it will crash the editor or at least force kill it. (FAFO).
+    /** Executes a PowerShell command. Admin mode uses UAC and cannot be fully silent. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Run PowerShell Command"))
+    static bool ExecutePowerShell(const FString& Command, bool bRunAsAdmin, bool bHidden);
+
+    /** Runs cmd.exe or PowerShell asynchronously and returns exit code plus captured output when available. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (AutoCreateRefTerm = "OnResult", DisplayName = "Run Command Async"))
+    static void RunCommandAsync(const FString& Command, FWNTCommandOptions Options, FOnWNTCommandResult OnResult);
+
+    /** Returns true when hard process termination is allowed in this runtime context. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Can Force Kill Game"))
+    static bool CanForceKillGame();
+
+    /** Immediately terminates the packaged game process. Refuses to run in editor to protect unsaved work. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Force Kill Game Process"))
     static void ForceKillGame();
-
-
-    // --- Deprecated Function List - THEY ARE DEPRECATED AT 2.3 & NOW WE ARE AT 2.4.1
-
-    //Retrieves GPU details: name, manufacturer, VRAM stats, and current game VRAM usage in megabytes (DeprecatedFunction)
-    //Warning : Never use this function it is an DeprecatedFunction & you should insted use the modern ones.
-    //There is 0 reason to use this, it has bad accuracy & may lag your game, why using it when better options exist ? huh?
-    //Remove it then..
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations", meta = (DeprecatedFunction, DeprecationMessage = "This function was splited into 3 different Functions, never use it"))
-    static void GetGPUInfo(FString& Name, FString& Manufacturer, int32& TotalVRAMMB, int32& UsedVRAMMB, int32& FreeVRAMMB);
-
 };
+

@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #pragma once
 
@@ -10,26 +10,46 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "BatteryUtility.generated.h"
 
+/** Current Windows battery and charging state. */
+USTRUCT(BlueprintType)
+struct FWNTBatteryStatus
+{
+    GENERATED_BODY()
+
+    /** True when Windows reports a real battery. */
+    UPROPERTY(BlueprintReadOnly, Category = "Battery")
+    bool bHasBattery = false;
+
+    /** Battery charge level from 0 to 100. */
+    UPROPERTY(BlueprintReadOnly, Category = "Battery")
+    int32 Level = 0;
+
+    /** True when AC power is connected and the battery is charging. */
+    UPROPERTY(BlueprintReadOnly, Category = "Battery")
+    bool bIsCharging = false;
+
+    /** True when AC power is connected and charge is 100 percent. */
+    UPROPERTY(BlueprintReadOnly, Category = "Battery")
+    bool bIsFullyCharged = false;
+
+    /** True when Windows returned a valid power status. */
+    UPROPERTY(BlueprintReadOnly, Category = "Battery")
+    bool bSuccess = false;
+
+    /** Readable error when bSuccess is false. */
+    UPROPERTY(BlueprintReadOnly, Category = "Battery")
+    FString ErrorMessage;
+};
+
+/** Native Windows battery helper nodes for Blueprints. */
 UCLASS()
 class SYSTEMUTILITYMODULE_API UBatteryUtility : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
-
-    //Verify If User Has A Battery
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Has Battery"))
-    static bool HasBattery();
-
-    //Get Battery Level Of User's Laptop
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Get Battery Level"))
-    static int32 GetBatteryLevel();
-
-    //Verify If User Laptop is in charge mode
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Is Battery Charging"))
-    static bool IsCharging();
-
-    //Verify If User Laptop Is Fully Charged
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Is Battery Fully Charged"))
-    static bool IsFullyCharged();
+    /** Returns complete battery information in one Blueprint node. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Get Battery Status"))
+    static FWNTBatteryStatus GetBatteryStatus();
 };
+

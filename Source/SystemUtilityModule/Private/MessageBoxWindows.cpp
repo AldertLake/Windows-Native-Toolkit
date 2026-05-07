@@ -1,20 +1,41 @@
-﻿// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #include "MessageBoxWindows.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/Engine.h"
-#include "Engine/GameViewportClient.h" 
-// -----------------
+#include "Engine/GameViewportClient.h"
+#include "Widgets/SWindow.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
 #include <Windows.h>
 #include <CommCtrl.h>
 #include "Windows/HideWindowsPlatformTypes.h"
+#endif
+
+#if PLATFORM_WINDOWS
+static HWND GetBestParentWindowHandle()
+{
+    if (FSlateApplication::IsInitialized())
+    {
+        return static_cast<HWND>(const_cast<void*>(FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr)));
+    }
+
+    if (GEngine && GEngine->GameViewport && GEngine->GameViewport->GetWindow().IsValid())
+    {
+        TSharedPtr<SWindow> Window = GEngine->GameViewport->GetWindow();
+        if (Window.IsValid() && Window->GetNativeWindow().IsValid())
+        {
+            return static_cast<HWND>(Window->GetNativeWindow()->GetOSWindowHandle());
+        }
+    }
+
+    return nullptr;
+}
 #endif
 
 void UNativeMessageBox::ShowNativeMessageBox(
@@ -28,11 +49,7 @@ void UNativeMessageBox::ShowNativeMessageBox(
     Result = EMessageBoxResult::Canceled;
 
 #if PLATFORM_WINDOWS
-    HWND ParentWindow = NULL;
-    if (GEngine && GEngine->GameViewport)
-    {
-        ParentWindow = (HWND)GEngine->GameViewport->GetWindow()->GetNativeWindow()->GetOSWindowHandle();
-    }
+    HWND ParentWindow = GetBestParentWindowHandle();
 
     UINT uType = 0;
     switch (Buttons)
@@ -90,18 +107,14 @@ void UNativeMessageBox::ShowMessageBox(
     Result = ECustomDialogResult::SecondButton;
 
 #if PLATFORM_WINDOWS
-    HWND ParentWindow = NULL;
-    if (GEngine && GEngine->GameViewport)
-    {
-        ParentWindow = (HWND)GEngine->GameViewport->GetWindow()->GetNativeWindow()->GetOSWindowHandle();
-    }
+    HWND ParentWindow = GetBestParentWindowHandle();
 
     TASKDIALOGCONFIG Config = { 0 };
     Config.cbSize = sizeof(Config);
     Config.hwndParent = ParentWindow;
-    Config.dwFlags = TDF_POSITION_RELATIVE_TO_WINDOW | TDF_ALLOW_DIALOG_CANCELLATION;
+    Config.dwFlags = TDF_POSITION_RELATIVE_TO_WINDOW | TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
 
-    Config.pszWindowTitle = *Title;   
+    Config.pszWindowTitle = *Title;
     Config.pszMainInstruction = *Message;
 
     switch (Icon)
@@ -149,7 +162,9 @@ void UNativeMessageBox::ShowMessageBox(
         }
     }
 #else
-    // Non-Windows Fallback
+
     UE_LOG(LogTemp, Warning, TEXT("Native Custom MessageBox is Windows Only."));
 #endif
 }
+
+

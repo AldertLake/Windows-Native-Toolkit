@@ -1,16 +1,20 @@
 {
 	"FileVersion": 3,
 	"Version": 2,
-	"VersionName": "2.4.1",
+	"VersionName": "2.5.1",
 	"FriendlyName": "Windows Native Toolkit",
-	"Description": "The Windows Toolkit provides Blueprint nodes for accessing native Windows features like hardware info, keyboard layout, message boxes, and file pickers. It streamlines Unreal Engine development by integrating essential system-level functionalities.",
+	"Description": "Windows Native Toolkit exposes Blueprint and C++ access to native Windows audio, hardware, display, process, file, network, Bluetooth, dialog, notification, and config workflows for Unreal Engine projects.",
 	"Category": "Windows Tools",
 	"CreatedBy": "AldertLake",
 	"CreatedByURL": "https://github.com/AldertLake",
-	"DocsURL": "https://aldertlake.gitbook.io/windows-native-toolkit/",
+	"DocsURL": "https://aldertlake-docs.vercel.app/docs/wnt",
 	"MarketplaceURL": "https://www.fab.com/listings/db1cb6ed-ac7e-4408-a901-e45d6694cb0b",
 	"SupportURL": "https://github.com/AldertLake/Windows-Native-Toolkit/issues",
-	"EngineVersion": "5.7.0",
+	"SupportedTargetPlatforms": [
+		"Win64",
+		"Mac",
+		"Linux"
+	],
 	"CanContainContent": false,
 	"Installed": true,
 	"FabURL": "com.epicgames.launcher://ue/Fab/product/af2d4c25-08a6-4db3-bef6-b0e0f8ed88a9",
@@ -20,39 +24,49 @@
 			"Type": "Editor",
 			"LoadingPhase": "PostEngineInit",
 			"PlatformAllowList": [
-				"Win64"
+				"Win64",
+				"Mac",
+				"Linux"
 			]
 		},
 		{
 			"Name": "SystemUtilityModule",
 			"Type": "Runtime",
-			"LoadingPhase": "PreLoadingScreen",
+			"LoadingPhase": "Default",
 			"PlatformAllowList": [
-				"Win64"
+				"Win64",
+				"Mac",
+				"Linux"
 			]
 		},
 		{
 			"Name": "NetworkUtilityModule",
 			"Type": "Runtime",
-			"LoadingPhase": "PreLoadingScreen",
+			"LoadingPhase": "Default",
 			"PlatformAllowList": [
-				"Win64"
+				"Win64",
+				"Mac",
+				"Linux"
 			]
 		},
 		{
 			"Name": "DeviceFrameworkModule",
 			"Type": "Runtime",
-			"LoadingPhase": "PreLoadingScreen",
+			"LoadingPhase": "Default",
 			"PlatformAllowList": [
-				"Win64"
+				"Win64",
+				"Mac",
+				"Linux"
 			]
 		},
 		{
 			"Name": "FileIOUtilityModule",
 			"Type": "Runtime",
-			"LoadingPhase": "PreLoadingScreen",
+			"LoadingPhase": "Default",
 			"PlatformAllowList": [
-				"Win64"
+				"Win64",
+				"Mac",
+				"Linux"
 			]
 		}
 	],

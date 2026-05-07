@@ -1,151 +1,149 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 #include "BluetoothManager.h"
+
+#if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
-#include "Windows/MinWindows.h"
+#include <windows.h>
 #include <bluetoothapis.h>
 #include <setupapi.h>
+#include <devguid.h>
 #include <bthsdpdef.h>
 #include <bthdef.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 
-// Verify if Bluetooth is currently enabled
+struct FBluetoothRadioFindHandle
+{
+    HBLUETOOTH_RADIO_FIND Handle;
+    FBluetoothRadioFindHandle(HBLUETOOTH_RADIO_FIND InHandle) : Handle(InHandle) {}
+    ~FBluetoothRadioFindHandle() { if (Handle) BluetoothFindRadioClose(Handle); }
+    operator HBLUETOOTH_RADIO_FIND() const { return Handle; }
+    bool IsValid() const { return Handle != nullptr; }
+};
+
+struct FBluetoothRadioHandle
+{
+    HANDLE Handle;
+    FBluetoothRadioHandle(HANDLE InHandle) : Handle(InHandle) {}
+    ~FBluetoothRadioHandle() { if (Handle) CloseHandle(Handle); }
+    operator HANDLE() const { return Handle; }
+    bool IsValid() const { return Handle != nullptr; }
+};
+
+struct FBluetoothDeviceFindHandle
+{
+    HBLUETOOTH_DEVICE_FIND Handle;
+    FBluetoothDeviceFindHandle(HBLUETOOTH_DEVICE_FIND InHandle) : Handle(InHandle) {}
+    ~FBluetoothDeviceFindHandle() { if (Handle) BluetoothFindDeviceClose(Handle); }
+    operator HBLUETOOTH_DEVICE_FIND() const { return Handle; }
+    bool IsValid() const { return Handle != nullptr; }
+};
+#endif
+
+bool UBluetoothManager::HasBluetoothAdapter()
+{
+    bool bHasAdapter = false;
+#if PLATFORM_WINDOWS
+    HDEVINFO hDevInfo = SetupDiGetClassDevs(&GUID_DEVCLASS_BLUETOOTH, NULL, NULL, DIGCF_PRESENT);
+    if (hDevInfo != INVALID_HANDLE_VALUE)
+    {
+        SP_DEVINFO_DATA DeviceInfoData;
+        DeviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+        if (SetupDiEnumDeviceInfo(hDevInfo, 0, &DeviceInfoData))
+        {
+            bHasAdapter = true;
+        }
+        SetupDiDestroyDeviceInfoList(hDevInfo);
+    }
+#endif
+    return bHasAdapter;
+}
+
 bool UBluetoothManager::IsBluetoothEnabled()
 {
+#if PLATFORM_WINDOWS
     BLUETOOTH_FIND_RADIO_PARAMS radioFindParams = { sizeof(BLUETOOTH_FIND_RADIO_PARAMS) };
     HANDLE hRadio = nullptr;
-    HBLUETOOTH_RADIO_FIND hRadioFind = BluetoothFindFirstRadio(&radioFindParams, &hRadio);
 
-    if (hRadioFind == nullptr)
-    {
-        return false; // No radios found
-    }
+    FBluetoothRadioFindHandle hRadioFind(BluetoothFindFirstRadio(&radioFindParams, &hRadio));
+    FBluetoothRadioHandle RadioHandle(hRadio);
 
-    BluetoothFindRadioClose(hRadioFind);
-
-    if (hRadio != nullptr)
-    {
-        CloseHandle(hRadio);
-    }
-
-    return true;
+    return hRadioFind.IsValid();
+#else
+    return false;
+#endif
 }
 
-// Get number of paired devices
-int32 UBluetoothManager::GetPairedDeviceCount()
+TArray<FBluetoothDeviceInfo> UBluetoothManager::GetPairedDevices()
 {
-    int32 deviceCount = 0;
+    TArray<FBluetoothDeviceInfo> ResultList;
 
-    // First, get a Bluetooth radio handle
+#if PLATFORM_WINDOWS
     BLUETOOTH_FIND_RADIO_PARAMS radioFindParams = { sizeof(BLUETOOTH_FIND_RADIO_PARAMS) };
-    HANDLE hRadio = nullptr;
-    HBLUETOOTH_RADIO_FIND hRadioFind = BluetoothFindFirstRadio(&radioFindParams, &hRadio);
+    HANDLE hRadioRaw = nullptr;
 
-    if (hRadioFind == nullptr || hRadio == nullptr)
+    FBluetoothRadioFindHandle hRadioFind(BluetoothFindFirstRadio(&radioFindParams, &hRadioRaw));
+    FBluetoothRadioHandle hRadio(hRadioRaw);
+
+    if (!hRadioFind.IsValid() || !hRadio.IsValid())
     {
-        return 0;
+        return ResultList;
     }
 
-    // Set up device search parameters
     BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams{};
     searchParams.dwSize = sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS);
-    searchParams.fReturnAuthenticated = 1;  
-    searchParams.fReturnRemembered = 1;   
-    searchParams.fReturnUnknown = 0;   
-    searchParams.fReturnConnected = 0;   
-    searchParams.fIssueInquiry = 0;  
+    searchParams.fReturnAuthenticated = 1;
+    searchParams.fReturnRemembered = 1;
+    searchParams.fReturnUnknown = 0;
+    searchParams.fReturnConnected = 1;
+    searchParams.fIssueInquiry = 0;
     searchParams.cTimeoutMultiplier = 0;
     searchParams.hRadio = hRadio;
-
 
     BLUETOOTH_DEVICE_INFO deviceInfo = { 0 };
     deviceInfo.dwSize = sizeof(BLUETOOTH_DEVICE_INFO);
 
-    // Find devices
-    HBLUETOOTH_DEVICE_FIND hDeviceFind = BluetoothFindFirstDevice(&searchParams, &deviceInfo);
+    FBluetoothDeviceFindHandle hDeviceFind(BluetoothFindFirstDevice(&searchParams, &deviceInfo));
 
-    if (hDeviceFind != nullptr)
+    if (hDeviceFind.IsValid())
     {
         do
         {
-            // Count only authenticated (paired) devices
-            if (deviceInfo.fAuthenticated)
+            if (deviceInfo.fAuthenticated || deviceInfo.fRemembered)
             {
-                deviceCount++;
+                FBluetoothDeviceInfo Info;
+                Info.Name = FString(deviceInfo.szName);
+                Info.Address = FString::Printf(TEXT("%02X:%02X:%02X:%02X:%02X:%02X"),
+                    deviceInfo.Address.rgBytes[5], deviceInfo.Address.rgBytes[4],
+                    deviceInfo.Address.rgBytes[3], deviceInfo.Address.rgBytes[2],
+                    deviceInfo.Address.rgBytes[1], deviceInfo.Address.rgBytes[0]);
+                Info.bIsConnected = deviceInfo.fConnected;
+                Info.bIsAuthenticated = deviceInfo.fAuthenticated;
+
+                ResultList.Add(Info);
             }
         } while (BluetoothFindNextDevice(hDeviceFind, &deviceInfo));
-
-        BluetoothFindDeviceClose(hDeviceFind);
     }
 
-    BluetoothFindRadioClose(hRadioFind);
-    CloseHandle(hRadio);
-
-    return deviceCount;
+#endif
+    return ResultList;
 }
 
-// Get paired device name by index
-FString UBluetoothManager::GetPairedDeviceName(int32 DeviceIndex)
+bool UBluetoothManager::IsBluetoothDeviceConnected(FString DeviceAddress)
 {
-    if (DeviceIndex < 0)
+    TArray<FBluetoothDeviceInfo> Devices = GetPairedDevices();
+    for (const FBluetoothDeviceInfo& Device : Devices)
     {
-        return FString();
-    }
-
-    // First, get a Bluetooth radio handle
-    BLUETOOTH_FIND_RADIO_PARAMS radioFindParams = { sizeof(BLUETOOTH_FIND_RADIO_PARAMS) };
-    HANDLE hRadio = nullptr;
-    HBLUETOOTH_RADIO_FIND hRadioFind = BluetoothFindFirstRadio(&radioFindParams, &hRadio);
-
-    if (hRadioFind == nullptr || hRadio == nullptr)
-    {
-        return FString();
-    }
-
-    // Set up device search parameters
-    BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams{};
-    searchParams.dwSize = sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS);
-    searchParams.fReturnAuthenticated = 1;  
-    searchParams.fReturnRemembered = 1;   
-    searchParams.fReturnUnknown = 0;   
-    searchParams.fReturnConnected = 0;   
-    searchParams.fIssueInquiry = 0;  
-    searchParams.cTimeoutMultiplier = 0;
-    searchParams.hRadio = hRadio;
-
-
-    BLUETOOTH_DEVICE_INFO deviceInfo = { 0 };
-    deviceInfo.dwSize = sizeof(BLUETOOTH_DEVICE_INFO);
-
-    HBLUETOOTH_DEVICE_FIND hDeviceFind = BluetoothFindFirstDevice(&searchParams, &deviceInfo);
-    int32 currentIndex = 0;
-    FString deviceName;
-
-    if (hDeviceFind != nullptr)
-    {
-        do
+        if (Device.Address.Equals(DeviceAddress, ESearchCase::IgnoreCase))
         {
-            if (deviceInfo.fAuthenticated)
-            {
-                if (currentIndex == DeviceIndex)
-                {
-                    // Convert the device name to FString
-                    deviceName = FString(deviceInfo.szName);
-                    break;
-                }
-                currentIndex++;
-            }
-        } while (BluetoothFindNextDevice(hDeviceFind, &deviceInfo));
-
-        BluetoothFindDeviceClose(hDeviceFind);
+            return Device.bIsConnected;
+        }
     }
-
-    BluetoothFindRadioClose(hRadioFind);
-    CloseHandle(hRadio);
-
-    return deviceName;
+    return false;
 }
+
+

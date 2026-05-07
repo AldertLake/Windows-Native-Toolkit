@@ -1,8 +1,8 @@
-// ---------------------------------------------------
-// Copyright (c) 2025 AldertLake. All Rights Reserved.
-// GitHub:   https://github.com/AldertLake/
-// Support:  https://ko-fi.com/aldertlake
-// ---------------------------------------------------
+﻿// -----------------------------------------------------
+// Copyright   (c) 2025 AldertLake. All Rights Reserved.
+// GitHub:     https://github.com/AldertLake/
+// Discord:    https://discord.gg/QpPPfh6WVn
+// -----------------------------------------------------
 
 using UnrealBuildTool;
 
@@ -29,10 +29,11 @@ public class DeviceFrameworkModule : ModuleRules
                 "User32.lib",
                 "XInput.lib",
                 "Advapi32.lib",
-                "dxgi.lib"
+                "dxgi.lib",
+                "pdh.lib"
             });
-
-
         }
     }
 }
+
+
