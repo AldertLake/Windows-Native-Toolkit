@@ -30,7 +30,11 @@ public class DeviceFrameworkModule : ModuleRules
                 "XInput.lib",
                 "Advapi32.lib",
                 "dxgi.lib",
-                "pdh.lib"
+                "pdh.lib",
+                "Setupapi.lib",
+                "Ole32.lib",
+                "OleAut32.lib",
+                "wbemuuid.lib"
             });
         }
     }

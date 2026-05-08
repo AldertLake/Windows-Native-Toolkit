@@ -25,7 +25,7 @@ FWNTBatteryStatus UBatteryUtility::GetBatteryStatus()
     SYSTEM_POWER_STATUS Status;
     if (!ReadWindowsPowerStatus(Status))
     {
-        Result.ErrorMessage = TEXT("Windows did not return power status.");
+        UE_LOG(LogTemp, Error, TEXT("Error: Get Battery Status failed because Windows did not return power status."));
         return Result;
     }
 
@@ -35,7 +35,7 @@ FWNTBatteryStatus UBatteryUtility::GetBatteryStatus()
     Result.bIsCharging = (Status.BatteryFlag & BATTERY_FLAG_CHARGING) != 0;
     Result.bIsFullyCharged = Status.ACLineStatus == 1 && Status.BatteryLifePercent == 100;
 #else
-    Result.ErrorMessage = TEXT("Battery status is only available on Windows.");
+    UE_LOG(LogTemp, Error, TEXT("Error: Get Battery Status is only available on Windows."));
 #endif
     return Result;
 }

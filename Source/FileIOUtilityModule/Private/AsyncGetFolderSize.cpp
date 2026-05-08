@@ -116,17 +116,7 @@ bool ValidateFolderSizePath(const FString& FolderPath, FString& OutPath, FString
 
 }
 
-UAsyncGetFolderSize* UAsyncGetFolderSize::GetFolderSizeAsync(const FString& FolderPath)
-{
-    UAsyncGetFolderSize* Node = NewObject<UAsyncGetFolderSize>();
-    Node->TargetFolderPath = FolderPath;
-    Node->bCancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
-    Node->AddToRoot();
-    Node->bAddedToRootForCompatibility = true;
-    return Node;
-}
-
-UAsyncGetFolderSize* UAsyncGetFolderSize::GetFolderSizeAsyncWithWorldContext(const UObject* WorldContextObject, const FString& FolderPath)
+UAsyncGetFolderSize* UAsyncGetFolderSize::GetFolderSize(const UObject* WorldContextObject, const FString& FolderPath)
 {
     UAsyncGetFolderSize* Node = NewObject<UAsyncGetFolderSize>();
     Node->TargetFolderPath = FolderPath;
@@ -162,7 +152,7 @@ void UAsyncGetFolderSize::Activate()
     FString ErrorMessage;
     if (!ValidateFolderSizePath(TargetFolderPath, PathCopy, ErrorMessage))
     {
-        OnError.Broadcast(ErrorMessage);
+        UE_LOG(LogTemp, Error, TEXT("Error: Get Folder Size failed. %s"), *ErrorMessage);
         OnFail.Broadcast(0);
         if (bAddedToRootForCompatibility)
         {
@@ -232,7 +222,8 @@ void UAsyncGetFolderSize::Activate()
             {
                 if (bCanceled)
                 {
-                    Node->OnCanceled.Broadcast();
+                    UE_LOG(LogTemp, Error, TEXT("Error: Get Folder Size failed. The operation was canceled."));
+                    Node->OnFail.Broadcast(0);
                 }
                 else if (bCompleted)
                 {
@@ -241,7 +232,7 @@ void UAsyncGetFolderSize::Activate()
                 }
                 else
                 {
-                    Node->OnError.Broadcast(TEXT("Failed to finish scanning the folder."));
+                    UE_LOG(LogTemp, Error, TEXT("Error: Get Folder Size failed to finish scanning the folder."));
                     Node->OnFail.Broadcast(0);
                 }
 

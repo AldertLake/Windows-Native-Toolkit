@@ -153,6 +153,7 @@ static void SetupCurlOptions(CURL* Curl, const FString& URL, const FString& User
     curl_easy_setopt(Curl, CURLOPT_FTP_CREATE_MISSING_DIRS, 2L);
     curl_easy_setopt(Curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(Curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(Curl, CURLOPT_NOSIGNAL, 1L);
 
     curl_easy_setopt(Curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(Curl, CURLOPT_XFERINFOFUNCTION, ProgressCallback);
@@ -163,6 +164,40 @@ static void SetupCurlOptions(CURL* Curl, const FString& URL, const FString& User
 #endif
 }
 #endif
+
+static FString ResolveDownloadFileName(const FString& URL, const FString& FileNameOverride = FString())
+{
+    FString FileName = FileNameOverride.TrimStartAndEnd();
+    if (FileName.IsEmpty())
+    {
+        FileName = FPaths::GetCleanFilename(URL);
+        int32 QueryIndex = INDEX_NONE;
+        if (FileName.FindChar(TEXT('?'), QueryIndex))
+        {
+            FileName = FileName.Left(QueryIndex);
+        }
+        FileName = FGenericPlatformHttp::UrlDecode(FileName);
+    }
+
+    return FPaths::GetCleanFilename(FileName);
+}
+
+static bool EnsureDirectoryExists(const FString& DirectoryPath, const TCHAR* Context)
+{
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    if (PlatformFile.DirectoryExists(*DirectoryPath))
+    {
+        return true;
+    }
+
+    if (PlatformFile.CreateDirectoryTree(*DirectoryPath))
+    {
+        return true;
+    }
+
+    UE_LOG(LogTemp, Error, TEXT("Error: %s failed because the destination directory could not be created: %s"), Context, *DirectoryPath);
+    return false;
+}
 
 void UServerHelper::CancelTransfer(FNetworkTransferHandle Handle)
 {
@@ -243,16 +278,23 @@ FNetworkTransferHandle UServerHelper::DownloadFileFTP(FString URL, FString User,
         FCurlEasyHandle CurlPtr;
         if (CurlPtr.IsValid())
         {
-            FString FileName = FPaths::GetCleanFilename(URL);
-            FileName = FGenericPlatformHttp::UrlDecode(FileName);
-            FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
-
-            IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-            if (!PlatformFile.DirectoryExists(*SaveDirectory))
+            const FString FileName = ResolveDownloadFileName(URL);
+            if (FileName.IsEmpty())
             {
-                PlatformFile.CreateDirectoryTree(*SaveDirectory);
+                UE_LOG(LogTemp, Error, TEXT("Error: Download File Using FTP failed because the file name could not be resolved from the URL."));
+                AsyncTask(ENamedThreads::GameThread, [OnComplete]() { OnComplete.ExecuteIfBound(false); });
+                return;
             }
 
+            FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
+
+            if (!EnsureDirectoryExists(SaveDirectory, TEXT("Download File Using FTP")))
+            {
+                AsyncTask(ENamedThreads::GameThread, [OnComplete]() { OnComplete.ExecuteIfBound(false); });
+                return;
+            }
+
+            IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
             TUniquePtr<FArchive> Writer(IFileManager::Get().CreateFileWriter(*FullSavePath));
             if (Writer)
             {
@@ -303,20 +345,21 @@ FNetworkTransferHandle UServerHelper::DownloadFileHTTP(FString URL, FString Save
     FNetworkTransferHandle Handle;
     TSharedPtr<std::atomic<bool>, ESPMode::ThreadSafe> CancelFlag = Handle.CancelFlag;
 
-    FString FileName = FPaths::GetCleanFilename(URL);
-    int32 QueryParamIndex;
-    if (FileName.FindChar('?', QueryParamIndex))
+    const FString FileName = ResolveDownloadFileName(URL);
+    if (FileName.IsEmpty())
     {
-        FileName = FileName.Left(QueryParamIndex);
+        UE_LOG(LogTemp, Error, TEXT("Error: Download File (HTTP/HTTPS) failed because the file name could not be resolved from the URL."));
+        OnComplete.ExecuteIfBound(false);
+        return Handle;
     }
-    FileName = FGenericPlatformHttp::UrlDecode(FileName);
-    FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
 
-    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-    if (!PlatformFile.DirectoryExists(*SaveDirectory))
+    if (!EnsureDirectoryExists(SaveDirectory, TEXT("Download File (HTTP/HTTPS)")))
     {
-        PlatformFile.CreateDirectoryTree(*SaveDirectory);
+        OnComplete.ExecuteIfBound(false);
+        return Handle;
     }
+
+    const FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
 
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
     Request->SetURL(URL);
@@ -337,7 +380,10 @@ FNetworkTransferHandle UServerHelper::DownloadFileHTTP(FString URL, FString Save
             if (TotalLength > 0)
             {
                 float Percent = (float)BytesReceived / (float)TotalLength;
-                OnProgress.ExecuteIfBound(Percent);
+                AsyncTask(ENamedThreads::GameThread, [OnProgress, Percent]()
+                {
+                    OnProgress.ExecuteIfBound(Percent);
+                });
             }
         }
     });
@@ -357,9 +403,16 @@ FNetworkTransferHandle UServerHelper::DownloadFileHTTP(FString URL, FString Save
             {
                 bSuccess = true;
             }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Error: Download File (HTTP/HTTPS) failed because the downloaded file could not be written to disk: %s"), *FullSavePath);
+            }
         }
 
-        OnComplete.ExecuteIfBound(bSuccess);
+        AsyncTask(ENamedThreads::GameThread, [OnComplete, bSuccess]()
+        {
+            OnComplete.ExecuteIfBound(bSuccess);
+        });
     });
 
     Request->ProcessRequest();
@@ -375,49 +428,38 @@ FNetworkTransferHandle UServerHelper::DownloadAdvanced(FString URL, FString Save
     FNetworkTransferResult EarlyResult;
     if (URL.TrimStartAndEnd().IsEmpty())
     {
-        EarlyResult.ErrorMessage = TEXT("URL is empty.");
+        UE_LOG(LogTemp, Error, TEXT("Error: Download Advanced failed because URL is empty."));
         OnComplete.ExecuteIfBound(EarlyResult);
         return Handle;
     }
 
     if (SaveDirectory.TrimStartAndEnd().IsEmpty())
     {
-        EarlyResult.ErrorMessage = TEXT("Save directory is empty.");
+        UE_LOG(LogTemp, Error, TEXT("Error: Download Advanced failed because save directory is empty."));
         OnComplete.ExecuteIfBound(EarlyResult);
         return Handle;
     }
 
-    FString FileName = FileNameOverride.TrimStartAndEnd();
+    FString FileName = ResolveDownloadFileName(URL, FileNameOverride);
     if (FileName.IsEmpty())
     {
-        FileName = FPaths::GetCleanFilename(URL);
-        int32 QueryIndex = INDEX_NONE;
-        if (FileName.FindChar(TEXT('?'), QueryIndex))
-        {
-            FileName = FileName.Left(QueryIndex);
-        }
-        FileName = FGenericPlatformHttp::UrlDecode(FileName);
-    }
-
-    FileName = FPaths::GetCleanFilename(FileName);
-    if (FileName.IsEmpty())
-    {
-        EarlyResult.ErrorMessage = TEXT("Could not resolve a valid output filename.");
+        UE_LOG(LogTemp, Error, TEXT("Error: Download Advanced failed because no valid output filename could be resolved."));
         OnComplete.ExecuteIfBound(EarlyResult);
         return Handle;
     }
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-    if (!PlatformFile.DirectoryExists(*SaveDirectory))
+    if (!EnsureDirectoryExists(SaveDirectory, TEXT("Download Advanced")))
     {
-        PlatformFile.CreateDirectoryTree(*SaveDirectory);
+        OnComplete.ExecuteIfBound(EarlyResult);
+        return Handle;
     }
 
     const FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
     if (PlatformFile.FileExists(*FullSavePath) && !bOverwrite)
     {
         EarlyResult.SavedFilePath = FullSavePath;
-        EarlyResult.ErrorMessage = TEXT("Destination file already exists.");
+        UE_LOG(LogTemp, Error, TEXT("Error: Download Advanced failed because the destination file already exists."));
         OnComplete.ExecuteIfBound(EarlyResult);
         return Handle;
     }
@@ -440,7 +482,10 @@ FNetworkTransferHandle UServerHelper::DownloadAdvanced(FString URL, FString Save
             {
                 TotalBytes = HttpRequest->GetResponse()->GetContentLength();
             }
-            OnProgress.ExecuteIfBound(static_cast<int64>(BytesReceived), TotalBytes);
+            AsyncTask(ENamedThreads::GameThread, [OnProgress, BytesReceived, TotalBytes]()
+            {
+                OnProgress.ExecuteIfBound(static_cast<int64>(BytesReceived), TotalBytes);
+            });
         });
 
     Request->OnProcessRequestComplete().BindLambda(
@@ -451,11 +496,11 @@ FNetworkTransferHandle UServerHelper::DownloadAdvanced(FString URL, FString Save
 
             if (CancelFlag.IsValid() && CancelFlag->load())
             {
-                Result.ErrorMessage = TEXT("Transfer was canceled.");
+                UE_LOG(LogTemp, Error, TEXT("Error: Download Advanced transfer was canceled."));
             }
             else if (!bWasSuccessful || !Response.IsValid())
             {
-                Result.ErrorMessage = TEXT("HTTP request failed.");
+                UE_LOG(LogTemp, Error, TEXT("Error: Download Advanced HTTP request failed."));
             }
             else
             {
@@ -472,12 +517,12 @@ FNetworkTransferHandle UServerHelper::DownloadAdvanced(FString URL, FString Save
                     }
                     else
                     {
-                        Result.ErrorMessage = TEXT("Failed to save downloaded file.");
+                        UE_LOG(LogTemp, Error, TEXT("Error: Download Advanced failed to save the downloaded file."));
                     }
                 }
                 else
                 {
-                    Result.ErrorMessage = FString::Printf(TEXT("HTTP status code %d."), Result.StatusCode);
+                    UE_LOG(LogTemp, Error, TEXT("Error: Download Advanced received HTTP status code %d."), Result.StatusCode);
                 }
             }
 
@@ -486,7 +531,10 @@ FNetworkTransferHandle UServerHelper::DownloadAdvanced(FString URL, FString Save
                 FPlatformFileManager::Get().GetPlatformFile().DeleteFile(*FullSavePath);
             }
 
-            OnComplete.ExecuteIfBound(Result);
+            AsyncTask(ENamedThreads::GameThread, [OnComplete, Result]()
+            {
+                OnComplete.ExecuteIfBound(Result);
+            });
         });
 
     Request->ProcessRequest();

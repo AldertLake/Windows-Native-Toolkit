@@ -19,6 +19,11 @@
 #endif
 
 #if PLATFORM_WINDOWS
+static void LogDisplayError(const TCHAR* Context, const FString& Message)
+{
+	UE_LOG(LogTemp, Error, TEXT("Error: %s failed. %s"), Context, *Message);
+}
+
 namespace WNTDisplay
 {
 	static bool IsActiveDisplayDevice(const DISPLAY_DEVICE& Device)
@@ -452,25 +457,13 @@ TArray<FWNTMonitorInfo> URefreshRateFunctionLibrary::GetMonitors()
 	return Result;
 }
 
-FString URefreshRateFunctionLibrary::GetGameWindowMonitorId()
-{
-#if PLATFORM_WINDOWS
-	FString MonitorId;
-	if (WNTDisplay::TryGetGameWindowMonitorId(MonitorId))
-	{
-		return MonitorId;
-	}
-#endif
-
-	return FString();
-}
-
 FWNTMonitorInfo URefreshRateFunctionLibrary::GetGameWindowMonitor()
 {
 	FWNTMonitorInfo Result;
 
 #if PLATFORM_WINDOWS
-	const FString MonitorId = GetGameWindowMonitorId();
+	FString MonitorId;
+	WNTDisplay::TryGetGameWindowMonitorId(MonitorId);
 	if (!MonitorId.IsEmpty())
 	{
 		WNTDisplay::TryGetMonitorInfoById(MonitorId, Result);
@@ -495,20 +488,20 @@ FWNTDisplayMode URefreshRateFunctionLibrary::GetCurrentDisplayMode(const FString
 	return Result;
 }
 
-bool URefreshRateFunctionLibrary::TestDisplayMode(const FString& MonitorId, FIntPoint Resolution, int32 RefreshRate, FString& OutError)
+bool URefreshRateFunctionLibrary::TestDisplayMode(const FString& MonitorId, FIntPoint Resolution, int32 RefreshRate)
 {
-	OutError.Reset();
-
 #if PLATFORM_WINDOWS
+	FString ErrorMessage;
 	FString ResolvedMonitorId;
-	if (!WNTDisplay::ResolveMonitorId(MonitorId, ResolvedMonitorId, &OutError))
+	if (!WNTDisplay::ResolveMonitorId(MonitorId, ResolvedMonitorId, &ErrorMessage))
 	{
+		LogDisplayError(TEXT("Test Display Mode"), ErrorMessage);
 		return false;
 	}
 
 	if (Resolution.X <= 0 || Resolution.Y <= 0 || RefreshRate <= 0)
 	{
-		OutError = TEXT("Resolution and refresh rate must be greater than zero.");
+		LogDisplayError(TEXT("Test Display Mode"), TEXT("Resolution and refresh rate must be greater than zero."));
 		return false;
 	}
 
@@ -516,7 +509,7 @@ bool URefreshRateFunctionLibrary::TestDisplayMode(const FString& MonitorId, FInt
 	DevMode.dmSize = sizeof(DEVMODE);
 	if (!EnumDisplaySettings(*ResolvedMonitorId, ENUM_CURRENT_SETTINGS, &DevMode))
 	{
-		OutError = TEXT("Failed to read current display settings.");
+		LogDisplayError(TEXT("Test Display Mode"), TEXT("Failed to read current display settings."));
 		return false;
 	}
 
@@ -528,29 +521,29 @@ bool URefreshRateFunctionLibrary::TestDisplayMode(const FString& MonitorId, FInt
 	const LONG TestResult = ChangeDisplaySettingsEx(*ResolvedMonitorId, &DevMode, nullptr, CDS_TEST, nullptr);
 	if (TestResult != DISP_CHANGE_SUCCESSFUL)
 	{
-		OutError = FString::Printf(TEXT("Windows rejected the display mode. Code: %ld"), TestResult);
+		LogDisplayError(TEXT("Test Display Mode"), FString::Printf(TEXT("Windows rejected the display mode. Code: %ld"), TestResult));
 		return false;
 	}
 
 	return true;
 #else
-	OutError = TEXT("Display mode control is only available on Windows.");
+	UE_LOG(LogTemp, Error, TEXT("Error: Test Display Mode failed. Display mode control is only available on Windows."));
 	return false;
 #endif
 }
 
-bool URefreshRateFunctionLibrary::ApplyDisplayMode(const FString& MonitorId, FIntPoint Resolution, int32 RefreshRate, float RevertAfterSeconds, FString& OutError)
+bool URefreshRateFunctionLibrary::ApplyDisplayMode(const FString& MonitorId, FIntPoint Resolution, int32 RefreshRate, float RevertAfterSeconds)
 {
-	OutError.Reset();
-
 #if PLATFORM_WINDOWS
+	FString ErrorMessage;
 	FString ResolvedMonitorId;
-	if (!WNTDisplay::ResolveMonitorId(MonitorId, ResolvedMonitorId, &OutError))
+	if (!WNTDisplay::ResolveMonitorId(MonitorId, ResolvedMonitorId, &ErrorMessage))
 	{
+		LogDisplayError(TEXT("Apply Display Mode"), ErrorMessage);
 		return false;
 	}
 
-	if (!TestDisplayMode(ResolvedMonitorId, Resolution, RefreshRate, OutError))
+	if (!TestDisplayMode(ResolvedMonitorId, Resolution, RefreshRate))
 	{
 		return false;
 	}
@@ -559,7 +552,7 @@ bool URefreshRateFunctionLibrary::ApplyDisplayMode(const FString& MonitorId, FIn
 	PreviousMode.dmSize = sizeof(DEVMODE);
 	if (!EnumDisplaySettings(*ResolvedMonitorId, ENUM_CURRENT_SETTINGS, &PreviousMode))
 	{
-		OutError = TEXT("Failed to read current display settings before applying the new mode.");
+		LogDisplayError(TEXT("Apply Display Mode"), TEXT("Failed to read current display settings before applying the new mode."));
 		return false;
 	}
 
@@ -572,7 +565,7 @@ bool URefreshRateFunctionLibrary::ApplyDisplayMode(const FString& MonitorId, FIn
 	const LONG ApplyResult = ChangeDisplaySettingsEx(*ResolvedMonitorId, &NewMode, nullptr, CDS_FULLSCREEN, nullptr);
 	if (ApplyResult != DISP_CHANGE_SUCCESSFUL)
 	{
-		OutError = FString::Printf(TEXT("Failed to apply display mode. Code: %ld"), ApplyResult);
+		LogDisplayError(TEXT("Apply Display Mode"), FString::Printf(TEXT("Windows rejected the display mode apply request. Code: %ld"), ApplyResult));
 		return false;
 	}
 
@@ -588,7 +581,7 @@ bool URefreshRateFunctionLibrary::ApplyDisplayMode(const FString& MonitorId, FIn
 
 	return true;
 #else
-	OutError = TEXT("Display mode control is only available on Windows.");
+	UE_LOG(LogTemp, Error, TEXT("Error: Apply Display Mode failed. Display mode control is only available on Windows."));
 	return false;
 #endif
 }
@@ -616,43 +609,33 @@ FIntPoint URefreshRateFunctionLibrary::GetNativeResolution(const FString& Monito
 	return FIntPoint(1920, 1080);
 }
 
-TArray<FIntPoint> URefreshRateFunctionLibrary::GetSupportedDisplayResolutions(const FString& MonitorId)
+void URefreshRateFunctionLibrary::GetSupportedDisplayModes(const FString& MonitorId, TArray<FIntPoint>& Resolutions, TArray<int32>& RefreshRates)
 {
-	TArray<FIntPoint> Resolutions;
+	Resolutions.Reset();
+	RefreshRates.Reset();
 
 #if PLATFORM_WINDOWS
 	FString ResolvedMonitorId;
 	if (!WNTDisplay::ResolveMonitorId(MonitorId, ResolvedMonitorId))
 	{
-		return Resolutions;
+		return;
 	}
 
-	TSet<FIntPoint> UniqueResolutions;
-	for (const FWNTDisplayMode& Mode : WNTDisplay::GetSupportedModes(ResolvedMonitorId))
-	{
-		UniqueResolutions.Add(Mode.Resolution);
-	}
+	const TArray<FWNTDisplayMode> Modes = WNTDisplay::GetSupportedModes(ResolvedMonitorId);
+	Resolutions.Reserve(Modes.Num());
+	RefreshRates.Reserve(Modes.Num());
 
-	Resolutions = UniqueResolutions.Array();
-	Resolutions.Sort([](const FIntPoint& A, const FIntPoint& B)
+	for (const FWNTDisplayMode& Mode : Modes)
 	{
-		const int64 APixels = static_cast<int64>(A.X) * static_cast<int64>(A.Y);
-		const int64 BPixels = static_cast<int64>(B.X) * static_cast<int64>(B.Y);
-		if (APixels != BPixels)
+		if (!Mode.bIsValid)
 		{
-			return APixels < BPixels;
+			continue;
 		}
-		if (A.X != B.X)
-		{
-			return A.X < B.X;
-		}
-		return A.Y < B.Y;
-	});
-#else
-	Resolutions.Add(FIntPoint(1920, 1080));
+
+		Resolutions.Add(Mode.Resolution);
+		RefreshRates.Add(Mode.RefreshRate);
+	}
 #endif
-
-	return Resolutions;
 }
 
 int32 URefreshRateFunctionLibrary::GetCurrentRefreshRate(const FString& MonitorId)
@@ -668,65 +651,26 @@ int32 URefreshRateFunctionLibrary::GetCurrentRefreshRate(const FString& MonitorI
 	return 60;
 }
 
-bool URefreshRateFunctionLibrary::SetRefreshRate(int32 NewRefreshRate, const FString& MonitorId, FString& OutError)
+bool URefreshRateFunctionLibrary::SetRefreshRate(int32 NewRefreshRate, const FString& MonitorId)
 {
-	OutError.Reset();
-
 #if PLATFORM_WINDOWS
 	if (NewRefreshRate <= 0)
 	{
-		OutError = TEXT("Refresh rate must be greater than zero.");
+		LogDisplayError(TEXT("Set Refresh Rate"), TEXT("Refresh rate must be greater than zero."));
 		return false;
 	}
 
 	const FWNTDisplayMode CurrentMode = GetCurrentDisplayMode(MonitorId);
 	if (!CurrentMode.bIsValid)
 	{
-		OutError = TEXT("Failed to read the current display mode.");
+		LogDisplayError(TEXT("Set Refresh Rate"), TEXT("Failed to read the current display mode."));
 		return false;
 	}
 
-	return ApplyDisplayMode(CurrentMode.MonitorId, CurrentMode.Resolution, NewRefreshRate, 0.0f, OutError);
+	return ApplyDisplayMode(CurrentMode.MonitorId, CurrentMode.Resolution, NewRefreshRate, 0.0f);
 #else
-	OutError = TEXT("Refresh rate control is only available on Windows.");
+	UE_LOG(LogTemp, Error, TEXT("Error: Set Refresh Rate failed. Refresh rate control is only available on Windows."));
 	return false;
 #endif
-}
-
-TArray<int32> URefreshRateFunctionLibrary::GetSupportedRefreshRates(const FString& MonitorId, FIntPoint Resolution)
-{
-	TArray<int32> Rates;
-
-#if PLATFORM_WINDOWS
-	FString ResolvedMonitorId;
-	if (!WNTDisplay::ResolveMonitorId(MonitorId, ResolvedMonitorId))
-	{
-		return Rates;
-	}
-
-	if (Resolution.X <= 0 || Resolution.Y <= 0)
-	{
-		const FWNTDisplayMode CurrentMode = GetCurrentDisplayMode(ResolvedMonitorId);
-		if (!CurrentMode.bIsValid)
-		{
-			return Rates;
-		}
-		Resolution = CurrentMode.Resolution;
-	}
-
-	TSet<int32> UniqueRates;
-	for (const FWNTDisplayMode& Mode : WNTDisplay::GetSupportedModes(ResolvedMonitorId))
-	{
-		if (Mode.Resolution == Resolution && Mode.RefreshRate > 0)
-		{
-			UniqueRates.Add(Mode.RefreshRate);
-		}
-	}
-
-	Rates = UniqueRates.Array();
-	Rates.Sort();
-#endif
-
-	return Rates;
 }
 

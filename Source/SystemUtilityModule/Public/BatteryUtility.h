@@ -35,10 +35,6 @@ struct FWNTBatteryStatus
     /** True when Windows returned a valid power status. */
     UPROPERTY(BlueprintReadOnly, Category = "Battery")
     bool bSuccess = false;
-
-    /** Readable error when bSuccess is false. */
-    UPROPERTY(BlueprintReadOnly, Category = "Battery")
-    FString ErrorMessage;
 };
 
 /** Native Windows battery helper nodes for Blueprints. */
@@ -49,7 +45,7 @@ class SYSTEMUTILITYMODULE_API UBatteryUtility : public UBlueprintFunctionLibrary
 
 public:
     /** Returns complete battery information in one Blueprint node. */
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Informations|Battery", meta = (DisplayName = "Get Battery Status"))
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Information|Battery", meta = (DisplayName = "Get Battery Status"))
     static FWNTBatteryStatus GetBatteryStatus();
 };
 

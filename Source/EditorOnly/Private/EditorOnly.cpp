@@ -99,7 +99,7 @@ void FEditorOnlyModule::ShowRatingDialogIfNeeded()
 			TEXT("---------------------------------------------------\n")
 		);
 
-		const FText Title = FText::FromString(TEXT("Windows Native Toolkit 2.4.1"));
+		const FText Title = FText::FromString(TEXT("Windows Native Toolkit"));
 		const EAppReturnType::Type Response = FMessageDialog::Open(
 			EAppMsgType::YesNoCancel,
 			Message,

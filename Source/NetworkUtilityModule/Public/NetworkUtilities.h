@@ -7,13 +7,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Kismet/BlueprintAsyncActionBase.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "NetworkUtilities.generated.h"
-
-DECLARE_DYNAMIC_DELEGATE_ThreeParams(FOnPublicIPResult, bool, bSuccess, FString, PublicIP, FString, ErrorMessage);
-DECLARE_DYNAMIC_DELEGATE_OneParam(FOnInternetAccessResult, bool, bHasInternet);
-DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnPingResult, bool, bSuccess, int32, PingMs);
-DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnDNSResult, bool, bSuccess, FString, ResolvedIP);
 
 /** Selects which public-IP provider to query. */
 UENUM(BlueprintType)
@@ -84,10 +80,149 @@ struct FWiFiNetworkInfo
     /** True when Windows returned valid Wi-Fi details. */
     UPROPERTY(BlueprintReadOnly, Category = "Network")
     bool bSuccess = false;
+};
 
-    /** Readable failure reason when bSuccess is false. */
+/** Detailed Ethernet information for one active interface. */
+USTRUCT(BlueprintType)
+struct FEthernetNetworkInfo
+{
+    GENERATED_BODY()
+
+    /** Readable adapter name reported by Windows. */
     UPROPERTY(BlueprintReadOnly, Category = "Network")
-    FString ErrorMessage;
+    FString InterfaceName;
+
+    /** Stable Windows interface identifier used by other network nodes. */
+    UPROPERTY(BlueprintReadOnly, Category = "Network")
+    FString InterfaceID;
+
+    /** Current IPv4 address when one is assigned. */
+    UPROPERTY(BlueprintReadOnly, Category = "Network")
+    FString IPv4Address;
+
+    /** Physical MAC address formatted with colons. */
+    UPROPERTY(BlueprintReadOnly, Category = "Network")
+    FString MACAddress;
+
+    /** Best reported link speed in megabits per second. */
+    UPROPERTY(BlueprintReadOnly, Category = "Network")
+    int64 LinkSpeedMbps = 0;
+
+    /** True when the interface appears to use DHCP for IPv4. */
+    UPROPERTY(BlueprintReadOnly, Category = "Network")
+    bool bDhcpEnabled = false;
+
+    /** True when Windows returned valid Ethernet details. */
+    UPROPERTY(BlueprintReadOnly, Category = "Network")
+    bool bSuccess = false;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FWNTInternetAccessCompleted, bool, bHasInternet);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FWNTPingCompleted, int32, PingMs);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FWNTDomainResolved, FString, ResolvedIP);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FWNTPublicIPResolved, FString, PublicIP);
+
+/** Async internet-access probe node with direct success and fail execution pins. */
+UCLASS()
+class NETWORKUTILITYMODULE_API UAsyncQueryInternetAccessAction : public UBlueprintAsyncActionBase
+{
+    GENERATED_BODY()
+
+public:
+    UPROPERTY(BlueprintAssignable)
+    FWNTInternetAccessCompleted OnSuccess;
+
+    UPROPERTY(BlueprintAssignable)
+    FWNTInternetAccessCompleted OnFail;
+
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Query Player Internet Access"))
+    static UAsyncQueryInternetAccessAction* QueryInternetAccess(const UObject* WorldContextObject, FString TargetURL, float Timeout);
+
+    virtual void Activate() override;
+
+private:
+    void Finalize(bool bSuccess, bool bHasInternet);
+
+    FString RequestedUrl;
+    float TimeoutSeconds = 0.0f;
+    bool bAddedToRootForCompatibility = false;
+};
+
+/** Async ping node with direct success and fail execution pins. */
+UCLASS()
+class NETWORKUTILITYMODULE_API UAsyncPingAddressAction : public UBlueprintAsyncActionBase
+{
+    GENERATED_BODY()
+
+public:
+    UPROPERTY(BlueprintAssignable)
+    FWNTPingCompleted OnSuccess;
+
+    UPROPERTY(BlueprintAssignable)
+    FWNTPingCompleted OnFail;
+
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Ping URL or IP"))
+    static UAsyncPingAddressAction* PingAddress(const UObject* WorldContextObject, FString Address, float Timeout);
+
+    virtual void Activate() override;
+
+private:
+    void Finalize(bool bSuccess, int32 PingMs);
+
+    FString AddressToPing;
+    float TimeoutSeconds = 0.0f;
+    bool bAddedToRootForCompatibility = false;
+};
+
+/** Async domain-resolution node with direct success and fail execution pins. */
+UCLASS()
+class NETWORKUTILITYMODULE_API UAsyncResolveDomainAction : public UBlueprintAsyncActionBase
+{
+    GENERATED_BODY()
+
+public:
+    UPROPERTY(BlueprintAssignable)
+    FWNTDomainResolved OnSuccess;
+
+    UPROPERTY(BlueprintAssignable)
+    FWNTDomainResolved OnFail;
+
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Resolve Domain Name"))
+    static UAsyncResolveDomainAction* ResolveDomain(const UObject* WorldContextObject, FString Hostname);
+
+    virtual void Activate() override;
+
+private:
+    void Finalize(bool bSuccess, const FString& ResolvedIP);
+
+    FString HostnameToResolve;
+    bool bAddedToRootForCompatibility = false;
+};
+
+/** Async public-IP lookup node with direct success and fail execution pins. */
+UCLASS()
+class NETWORKUTILITYMODULE_API UAsyncGetPublicIPAction : public UBlueprintAsyncActionBase
+{
+    GENERATED_BODY()
+
+public:
+    UPROPERTY(BlueprintAssignable)
+    FWNTPublicIPResolved OnSuccess;
+
+    UPROPERTY(BlueprintAssignable)
+    FWNTPublicIPResolved OnFail;
+
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Get Public IP"))
+    static UAsyncGetPublicIPAction* GetPublicIP(const UObject* WorldContextObject, EPublicIPProvider Mode, float Timeout);
+
+    virtual void Activate() override;
+
+private:
+    void Finalize(bool bSuccess, const FString& PublicIP);
+
+    EPublicIPProvider ProviderMode = EPublicIPProvider::Auto;
+    float TimeoutSeconds = 0.0f;
+    bool bAddedToRootForCompatibility = false;
 };
 
 /** Native Windows networking helper nodes for Blueprints. */
@@ -102,44 +237,25 @@ public:
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Is Connected To Internet"))
     static bool IsConnectedToInternet();
 
-    /** Sends a lightweight request to confirm that the machine can reach the internet, not just a local network. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Query Player Internet Access"))
-    static void QueryInternetAccess(FString TargetURL, float Timeout, FOnInternetAccessResult OnResult);
-
     /** Returns the active Windows network connection type, such as Wi-Fi, Ethernet, both, or none. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Wireless Operations|Wi-Fi", meta = (DisplayName = "Get Network Connection Type"))
     static ENetworkWindowsType GetConnectionType();
     
-    /** Pings a host name or IP address asynchronously and returns success plus round-trip time. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Ping URL or IP"))
-    static void PingAddress(FString Address, float Timeout, FOnPingResult OnResult);
-
-    /** Resolves a host name to an IPv4 address asynchronously. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Resolve Domain Name"))
-    static void ResolveDomain(FString Hostname, FOnDNSResult OnResult);
-
     /** Returns all active network interfaces that Windows currently reports for connectivity queries. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Get Available Network Interfaces"))
     static TArray<FNetworkInterfaceInfo> GetAvailableInterfaces();
-
-    /** Returns the Wi-Fi SSID for a specific interface ID from Get Available Network Interfaces. */
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Get Wi-Fi Network SSID"))
-    static FString GetWifiNetworkName(FString InterfaceID);
 
     /** Returns detailed Wi-Fi information, including SSID, BSSID, signal quality, and authentication mode. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Get Detailed Wi-Fi Info"))
     static FWiFiNetworkInfo GetDetailedWiFiInfo(FString InterfaceID);
 
+    /** Returns detailed Ethernet information for a specific interface ID. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Get Detailed Ethernet Info"))
+    static FEthernetNetworkInfo GetDetailedEthernetInfo(FString InterfaceID);
+
     /** Returns the private IPv4 address currently assigned to a specific network interface. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Get Private IPv4 Address"))
     static FString GetLocalIpForInterface(FString InterfaceID);
 
-    /** Returns the public IPv4 address with explicit success and error pins. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (DisplayName = "Get Public IP"))
-    static void GetPublicIP(EPublicIPProvider Mode, float Timeout, FOnPublicIPResult OnResult);
-
-private:
-
-    static void ProcessIPRequest(int32 Index, bool bIsAutoMode, float Timeout, FOnPublicIPResult Callback);
 };
 

@@ -44,10 +44,6 @@ struct FNetworkTransferResult
     /** SHA1 hash of the downloaded file content when available. */
     UPROPERTY(BlueprintReadOnly, Category = "Network Transfer")
     FString SHA1;
-
-    /** Readable error message when bSuccess is false. */
-    UPROPERTY(BlueprintReadOnly, Category = "Network Transfer")
-    FString ErrorMessage;
 };
 
 DECLARE_DYNAMIC_DELEGATE_OneParam(FOnTransferResult, FNetworkTransferResult, Result);

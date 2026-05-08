@@ -7,6 +7,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineTypes.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "AudioSystemLibrary.generated.h"
 
@@ -49,6 +50,33 @@ struct FAudioDeviceInfo
     FString DeviceID;
 };
 
+/** One shared-mode format option that an audio endpoint accepts. */
+USTRUCT(BlueprintType)
+struct FWNTAudioDeviceFormat
+{
+    GENERATED_BODY()
+
+    /** Index used by Set Audio Device Default Format. */
+    UPROPERTY(BlueprintReadOnly, Category = "Audio")
+    int32 FormatIndex = -1;
+
+    /** Number of audio channels, such as 2 for stereo. */
+    UPROPERTY(BlueprintReadOnly, Category = "Audio")
+    int32 ChannelCount = 0;
+
+    /** Audio sample rate in hertz. */
+    UPROPERTY(BlueprintReadOnly, Category = "Audio")
+    int32 SampleRate = 0;
+
+    /** Container bit depth reported by the format. */
+    UPROPERTY(BlueprintReadOnly, Category = "Audio")
+    int32 BitsPerSample = 0;
+
+    /** Readable summary, for example Stereo, 24-bit, 48000 Hz. */
+    UPROPERTY(BlueprintReadOnly, Category = "Audio")
+    FString Description;
+};
+
 /** Native Windows audio endpoint helper nodes for Blueprints. */
 UCLASS()
 class DEVICEFRAMEWORKMODULE_API UAudioSystemLibrary : public UBlueprintFunctionLibrary
@@ -61,27 +89,47 @@ public:
     static TArray<FAudioDeviceInfo> GetAudioDevices(EWNTAudioDeviceFlow Flow);
 
     /** Returns the default Windows endpoint for the selected flow and role. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Default Audio Device"))
-    static bool GetDefaultAudioDevice(EWNTAudioDeviceFlow Flow, EWNTAudioDeviceRole Role, FAudioDeviceInfo& OutDevice, FString& OutError);
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Default Audio Device"))
+    static bool GetDefaultAudioDevice(EWNTAudioDeviceFlow Flow, EWNTAudioDeviceRole Role, FAudioDeviceInfo& OutDevice);
+
+    /** Sets the default Windows audio device for normal playback or recording. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Default Audio Device"))
+    static bool SetDefaultAudioDevice(const FString& DeviceID);
+
+    /** Sets the default Windows communications device for calls and chat apps. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Communication Audio Device"))
+    static bool SetCommunicationAudioDevice(const FString& DeviceID);
 
     /** Sets endpoint volume from 0.0 to 1.0 for any input or output device ID. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Audio Volume"))
-    static bool SetAudioDeviceVolume(const FString& DeviceID, float Volume, FString& OutError);
+    static bool SetAudioDeviceVolume(const FString& DeviceID, float Volume);
 
     /** Reads endpoint volume from 0.0 to 1.0 for any input or output device ID. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Audio Volume"))
-    static bool GetAudioDeviceVolume(const FString& DeviceID, float& OutVolume, FString& OutError);
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Audio Volume"))
+    static bool GetAudioDeviceVolume(const FString& DeviceID, float& OutVolume);
 
     /** Sets endpoint mute state for any input or output device ID. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Audio Muted"))
-    static bool SetAudioDeviceMuted(const FString& DeviceID, bool bMuted, FString& OutError);
+    static bool SetAudioDeviceMuted(const FString& DeviceID, bool bMuted);
 
     /** Reads endpoint mute state for any input or output device ID. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Is Audio Muted"))
-    static bool GetAudioDeviceMuted(const FString& DeviceID, bool& bMuted, FString& OutError);
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Is Audio Muted"))
+    static bool GetAudioDeviceMuted(const FString& DeviceID, bool& bMuted);
 
     /** Reads the current endpoint peak level from 0.0 to 1.0 for visualization. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Audio Peak"))
-    static bool GetAudioDevicePeak(const FString& DeviceID, float& OutPeakValue, FString& OutError);
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Audio Peak"))
+    static bool GetAudioDevicePeak(const FString& DeviceID, float& OutPeakValue);
+
+    /** Returns the shared-mode formats that Windows currently accepts for the device. */
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Get Supported Audio Device Default Formats"))
+    static TArray<FWNTAudioDeviceFormat> GetSupportedAudioDeviceFormats(const FString& DeviceID);
+
+    /** Sets the shared-mode default format by using an index returned from Get Supported Audio Device Default Formats. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Audio Device Default Format"))
+    static bool SetAudioDeviceDefaultFormat(const FString& DeviceID, int32 FormatIndex);
+
+    /** Shows or hides an audio endpoint in the Windows audio-device list. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Sound Operations", meta = (DisplayName = "Set Audio Device Visibility"))
+    static bool SetAudioDeviceEnabled(const FString& DeviceID, UPARAM(DisplayName = "Visible") bool bEnabled);
 };
 

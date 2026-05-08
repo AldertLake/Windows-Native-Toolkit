@@ -91,25 +91,9 @@ void BuildFilterSpecs(const FString& FileTypes, TArray<FString>& OutNames, TArra
 }
 #endif
 
-bool UFilePickerLibrary::OpenFile(const FString& DialogTitle, const FString& DefaultPath, const FString& FileTypes, FString& OutFilename)
+bool UFilePickerLibrary::OpenPathPicker(const FString& DialogTitle, const FString& DefaultPath, const FString& FileTypes, bool bAllowMultiple, EFilePickerType PickerType, TArray<FString>& OutPaths)
 {
-    TArray<FString> Files;
-    const bool bResult = OpenFileFolderPicker(DialogTitle, DefaultPath, FileTypes, false, EFilePickerType::File, Files);
-    OutFilename = Files.Num() > 0 ? Files[0] : FString();
-    return bResult && !OutFilename.IsEmpty();
-}
-
-bool UFilePickerLibrary::OpenFiles(const FString& DialogTitle, const FString& DefaultPath, const FString& FileTypes, TArray<FString>& OutFilenames)
-{
-    return OpenFileFolderPicker(DialogTitle, DefaultPath, FileTypes, true, EFilePickerType::File, OutFilenames);
-}
-
-bool UFilePickerLibrary::OpenFolder(const FString& DialogTitle, const FString& DefaultPath, FString& OutFolder)
-{
-    TArray<FString> Folders;
-    const bool bResult = OpenFileFolderPicker(DialogTitle, DefaultPath, FString(), false, EFilePickerType::Folder, Folders);
-    OutFolder = Folders.Num() > 0 ? Folders[0] : FString();
-    return bResult && !OutFolder.IsEmpty();
+    return OpenFileFolderPicker(DialogTitle, DefaultPath, FileTypes, bAllowMultiple, PickerType, OutPaths);
 }
 
 FString UFilePickerLibrary::MakeFileFilter(const TArray<FFileDialogFilter>& Filters)
@@ -232,7 +216,7 @@ bool UFilePickerLibrary::OpenFileFolderPicker(
 #endif
 }
 
-bool UFilePickerLibrary::OpenSaveFileDialog(
+bool UFilePickerLibrary::ShowSaveFilePicker(
     const FString& DialogTitle,
     const FString& DefaultPath,
     const FString& DefaultFileName,
@@ -317,38 +301,6 @@ bool UFilePickerLibrary::OpenSaveFileDialog(
     return false;
 #else
     return false;
-#endif
-}
-
-FString UFilePickerLibrary::GetCurrentKeyboardLayout()
-{
-#if PLATFORM_WINDOWS
-    TCHAR KeyboardLayoutName[KL_NAMELENGTH] = { 0 };
-    if (GetKeyboardLayoutName(KeyboardLayoutName) && KeyboardLayoutName[0])
-    {
-        return FString(KeyboardLayoutName);
-    }
-    return FString(TEXT("Unknown"));
-#else
-    return FString(TEXT("Unknown"));
-#endif
-}
-
-FString UFilePickerLibrary::GetSystemLanguage()
-{
-#if PLATFORM_WINDOWS
-    LANGID LangID = GetSystemDefaultLangID();
-    if (LangID != 0)
-    {
-        WCHAR LocaleName[LOCALE_NAME_MAX_LENGTH] = { 0 };
-        if (LCIDToLocaleName(MAKELCID(LangID, SORT_DEFAULT), LocaleName, LOCALE_NAME_MAX_LENGTH, 0) && LocaleName[0])
-        {
-            return FString(LocaleName);
-        }
-    }
-    return FString(TEXT("Unknown"));
-#else
-    return FString(TEXT("Unknown"));
 #endif
 }
 

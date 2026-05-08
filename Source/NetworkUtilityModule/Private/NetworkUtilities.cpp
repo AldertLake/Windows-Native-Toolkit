@@ -10,7 +10,10 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Async/Async.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "WindowsNativeToolkitSettings.h"
+#include <atomic>
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -57,6 +60,33 @@ struct FScopedComInit
 
 namespace
 {
+    static TArray<FString> GetPublicIPProviderUrls();
+    static FString GetDefaultInternetAccessUrl();
+    static float GetDefaultInternetAccessTimeoutSeconds();
+    static float GetDefaultPingTimeoutSeconds();
+    static float GetDefaultPublicIPTimeoutSeconds();
+
+    static void LogNetworkError(const TCHAR* Context, const FString& Message)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Error: %s failed. %s"), Context, *Message);
+    }
+
+    static FString FormatMacAddress(const uint8* Address, uint32 Length)
+    {
+        if (!Address || Length == 0)
+        {
+            return FString();
+        }
+
+        TArray<FString> Parts;
+        Parts.Reserve(static_cast<int32>(Length));
+        for (uint32 Index = 0; Index < Length; ++Index)
+        {
+            Parts.Add(FString::Printf(TEXT("%02X"), Address[Index]));
+        }
+        return FString::Join(Parts, TEXT(":"));
+    }
+
     static TArray<FString> GetPublicIPProviderUrls()
     {
         const UWindowsNativeToolkitSettings* Settings = GetDefault<UWindowsNativeToolkitSettings>();
@@ -94,6 +124,417 @@ namespace
     }
 }
 
+UAsyncQueryInternetAccessAction* UAsyncQueryInternetAccessAction::QueryInternetAccess(const UObject* WorldContextObject, FString TargetURL, float Timeout)
+{
+    UAsyncQueryInternetAccessAction* Node = NewObject<UAsyncQueryInternetAccessAction>();
+    Node->RequestedUrl = MoveTemp(TargetURL);
+    Node->TimeoutSeconds = Timeout;
+    if (WorldContextObject)
+    {
+        Node->RegisterWithGameInstance(WorldContextObject);
+    }
+    else
+    {
+        Node->AddToRoot();
+        Node->bAddedToRootForCompatibility = true;
+    }
+    return Node;
+}
+
+void UAsyncQueryInternetAccessAction::Activate()
+{
+    if (RequestedUrl.IsEmpty())
+    {
+        RequestedUrl = GetDefaultInternetAccessUrl();
+    }
+
+    if (TimeoutSeconds <= 0.1f)
+    {
+        TimeoutSeconds = GetDefaultInternetAccessTimeoutSeconds();
+    }
+
+    TWeakObjectPtr<UAsyncQueryInternetAccessAction> WeakThis(this);
+    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+    Request->SetURL(RequestedUrl);
+    Request->SetVerb(TEXT("HEAD"));
+    Request->SetTimeout(TimeoutSeconds);
+    Request->OnProcessRequestComplete().BindLambda([WeakThis](FHttpRequestPtr HttpRequest, FHttpResponsePtr Response, bool bWasSuccessful)
+    {
+        bool bHasInternet = false;
+        bool bRequestSucceeded = false;
+
+        if (bWasSuccessful && Response.IsValid())
+        {
+            bRequestSucceeded = true;
+            const int32 Code = Response->GetResponseCode();
+            bHasInternet = (Code >= 200 && Code < 400);
+        }
+
+        if (!bRequestSucceeded)
+        {
+            LogNetworkError(TEXT("Query Player Internet Access"), TEXT("The HTTP probe did not return a valid response."));
+        }
+
+        if (UAsyncQueryInternetAccessAction* Node = WeakThis.Get())
+        {
+            Node->Finalize(bRequestSucceeded, bHasInternet);
+        }
+    });
+
+    if (!Request->ProcessRequest())
+    {
+        LogNetworkError(TEXT("Query Player Internet Access"), TEXT("Failed to start the HTTP probe request."));
+        Finalize(false, false);
+    }
+}
+
+void UAsyncQueryInternetAccessAction::Finalize(bool bSuccess, bool bHasInternet)
+{
+    if (bSuccess)
+    {
+        OnSuccess.Broadcast(bHasInternet);
+    }
+    else
+    {
+        OnFail.Broadcast(bHasInternet);
+    }
+
+    if (bAddedToRootForCompatibility)
+    {
+        RemoveFromRoot();
+        bAddedToRootForCompatibility = false;
+    }
+
+    SetReadyToDestroy();
+}
+
+UAsyncPingAddressAction* UAsyncPingAddressAction::PingAddress(const UObject* WorldContextObject, FString Address, float Timeout)
+{
+    UAsyncPingAddressAction* Node = NewObject<UAsyncPingAddressAction>();
+    Node->AddressToPing = MoveTemp(Address);
+    Node->TimeoutSeconds = Timeout;
+    if (WorldContextObject)
+    {
+        Node->RegisterWithGameInstance(WorldContextObject);
+    }
+    else
+    {
+        Node->AddToRoot();
+        Node->bAddedToRootForCompatibility = true;
+    }
+    return Node;
+}
+
+void UAsyncPingAddressAction::Activate()
+{
+#if PLATFORM_WINDOWS
+    if (TimeoutSeconds <= 0.1f)
+    {
+        TimeoutSeconds = GetDefaultPingTimeoutSeconds();
+    }
+
+    TWeakObjectPtr<UAsyncPingAddressAction> WeakThis(this);
+    const FString AddressCopy = AddressToPing;
+    const float TimeoutCopy = TimeoutSeconds;
+    Async(EAsyncExecution::Thread, [WeakThis, AddressCopy, TimeoutCopy]()
+    {
+        bool bSuccess = false;
+        int32 PingMs = -1;
+
+        HANDLE hIcmpFile = IcmpCreateFile();
+        if (hIcmpFile != INVALID_HANDLE_VALUE)
+        {
+            ADDRINFOA hints = {};
+            PADDRINFOA res = nullptr;
+            hints.ai_family = AF_INET;
+
+            if (GetAddrInfoA(TCHAR_TO_ANSI(*AddressCopy), nullptr, &hints, &res) == 0 && res != nullptr)
+            {
+                sockaddr_in* ipv4 = reinterpret_cast<sockaddr_in*>(res->ai_addr);
+                IPAddr destIp = ipv4->sin_addr.S_un.S_addr;
+                FreeAddrInfoA(res);
+
+                char SendData[32] = "Ping Buffer Data for Testing";
+                DWORD ReplySize = sizeof(ICMP_ECHO_REPLY) + sizeof(SendData) + 8;
+                TArray<uint8> ReplyBuffer;
+                ReplyBuffer.SetNumZeroed(ReplySize);
+
+                DWORD dwRetVal = IcmpSendEcho(hIcmpFile, destIp, SendData, sizeof(SendData),
+                    nullptr, ReplyBuffer.GetData(), ReplySize, FMath::Max(100.0f, TimeoutCopy * 1000.0f));
+
+                if (dwRetVal != 0)
+                {
+                    PICMP_ECHO_REPLY pEchoReply = reinterpret_cast<PICMP_ECHO_REPLY>(ReplyBuffer.GetData());
+                    if (pEchoReply->Status == IP_SUCCESS)
+                    {
+                        bSuccess = true;
+                        PingMs = pEchoReply->RoundTripTime;
+                    }
+                }
+            }
+
+            IcmpCloseHandle(hIcmpFile);
+        }
+
+        if (!bSuccess)
+        {
+            LogNetworkError(TEXT("Ping URL or IP"), TEXT("The host did not respond to ICMP echo."));
+        }
+
+        AsyncTask(ENamedThreads::GameThread, [WeakThis, bSuccess, PingMs]()
+        {
+            if (UAsyncPingAddressAction* Node = WeakThis.Get())
+            {
+                Node->Finalize(bSuccess, PingMs);
+            }
+        });
+    });
+#else
+    LogNetworkError(TEXT("Ping URL or IP"), TEXT("Ping is only available on Windows."));
+    Finalize(false, -1);
+#endif
+}
+
+void UAsyncPingAddressAction::Finalize(bool bSuccess, int32 PingMs)
+{
+    if (bSuccess)
+    {
+        OnSuccess.Broadcast(PingMs);
+    }
+    else
+    {
+        OnFail.Broadcast(PingMs);
+    }
+
+    if (bAddedToRootForCompatibility)
+    {
+        RemoveFromRoot();
+        bAddedToRootForCompatibility = false;
+    }
+
+    SetReadyToDestroy();
+}
+
+UAsyncResolveDomainAction* UAsyncResolveDomainAction::ResolveDomain(const UObject* WorldContextObject, FString Hostname)
+{
+    UAsyncResolveDomainAction* Node = NewObject<UAsyncResolveDomainAction>();
+    Node->HostnameToResolve = MoveTemp(Hostname);
+    if (WorldContextObject)
+    {
+        Node->RegisterWithGameInstance(WorldContextObject);
+    }
+    else
+    {
+        Node->AddToRoot();
+        Node->bAddedToRootForCompatibility = true;
+    }
+    return Node;
+}
+
+void UAsyncResolveDomainAction::Activate()
+{
+#if PLATFORM_WINDOWS
+    TWeakObjectPtr<UAsyncResolveDomainAction> WeakThis(this);
+    const FString HostnameCopy = HostnameToResolve;
+    Async(EAsyncExecution::Thread, [WeakThis, HostnameCopy]()
+    {
+        bool bSuccess = false;
+        FString LocalResolvedIP;
+
+        ADDRINFOA hints = {};
+        PADDRINFOA res = nullptr;
+        hints.ai_family = AF_INET;
+
+        if (GetAddrInfoA(TCHAR_TO_ANSI(*HostnameCopy), nullptr, &hints, &res) == 0 && res != nullptr)
+        {
+            sockaddr_in* ipv4 = reinterpret_cast<sockaddr_in*>(res->ai_addr);
+            char ipStr[INET_ADDRSTRLEN];
+            InetNtopA(AF_INET, &(ipv4->sin_addr), ipStr, INET_ADDRSTRLEN);
+            LocalResolvedIP = FString(UTF8_TO_TCHAR(ipStr));
+            bSuccess = true;
+            FreeAddrInfoA(res);
+        }
+
+        if (!bSuccess)
+        {
+            LogNetworkError(TEXT("Resolve Domain Name"), TEXT("The host name could not be resolved to an IPv4 address."));
+        }
+
+        AsyncTask(ENamedThreads::GameThread, [WeakThis, bSuccess, LocalResolvedIP]()
+        {
+            if (UAsyncResolveDomainAction* Node = WeakThis.Get())
+            {
+                Node->Finalize(bSuccess, LocalResolvedIP);
+            }
+        });
+    });
+#else
+    LogNetworkError(TEXT("Resolve Domain Name"), TEXT("DNS resolution is only available on Windows."));
+    Finalize(false, FString());
+#endif
+}
+
+void UAsyncResolveDomainAction::Finalize(bool bSuccess, const FString& ResolvedIP)
+{
+    if (bSuccess)
+    {
+        OnSuccess.Broadcast(ResolvedIP);
+    }
+    else
+    {
+        OnFail.Broadcast(ResolvedIP);
+    }
+
+    if (bAddedToRootForCompatibility)
+    {
+        RemoveFromRoot();
+        bAddedToRootForCompatibility = false;
+    }
+
+    SetReadyToDestroy();
+}
+
+UAsyncGetPublicIPAction* UAsyncGetPublicIPAction::GetPublicIP(const UObject* WorldContextObject, EPublicIPProvider Mode, float Timeout)
+{
+    UAsyncGetPublicIPAction* Node = NewObject<UAsyncGetPublicIPAction>();
+    Node->ProviderMode = Mode;
+    Node->TimeoutSeconds = Timeout;
+    if (WorldContextObject)
+    {
+        Node->RegisterWithGameInstance(WorldContextObject);
+    }
+    else
+    {
+        Node->AddToRoot();
+        Node->bAddedToRootForCompatibility = true;
+    }
+    return Node;
+}
+
+void UAsyncGetPublicIPAction::Activate()
+{
+    if (TimeoutSeconds <= 0.1f)
+    {
+        TimeoutSeconds = GetDefaultPublicIPTimeoutSeconds();
+    }
+
+    int32 StartIndex = 0;
+    bool bIsAuto = false;
+
+    switch (ProviderMode)
+    {
+    case EPublicIPProvider::Auto:
+        StartIndex = 0;
+        bIsAuto = true;
+        break;
+    case EPublicIPProvider::IfConfig:
+        StartIndex = 0;
+        break;
+    case EPublicIPProvider::Amazon:
+        StartIndex = 1;
+        break;
+    case EPublicIPProvider::ICanHazIP:
+        StartIndex = 2;
+        break;
+    default:
+        StartIndex = 0;
+        bIsAuto = true;
+        break;
+    }
+
+    TWeakObjectPtr<UAsyncGetPublicIPAction> WeakThis(this);
+    const TArray<FString> ProviderUrls = GetPublicIPProviderUrls();
+    const float TimeoutCopy = TimeoutSeconds;
+    TSharedRef<TFunction<void(int32)>, ESPMode::ThreadSafe> AttemptRequest = MakeShared<TFunction<void(int32)>, ESPMode::ThreadSafe>();
+
+    *AttemptRequest = [WeakThis, ProviderUrls, TimeoutCopy, bIsAuto, AttemptRequest](int32 Index)
+    {
+        if (!ProviderUrls.IsValidIndex(Index))
+        {
+            LogNetworkError(TEXT("Get Public IP"), TEXT("All public IP providers failed."));
+            if (UAsyncGetPublicIPAction* Node = WeakThis.Get())
+            {
+                Node->Finalize(false, FString());
+            }
+            return;
+        }
+
+        TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+        Request->SetURL(ProviderUrls[Index]);
+        Request->SetVerb(TEXT("GET"));
+        Request->SetTimeout(TimeoutCopy);
+        Request->OnProcessRequestComplete().BindLambda([WeakThis, ProviderUrls, TimeoutCopy, bIsAuto, AttemptRequest, Index](FHttpRequestPtr HttpRequest, FHttpResponsePtr Response, bool bWasSuccessful)
+        {
+            if (bWasSuccessful && Response.IsValid() && EHttpResponseCodes::IsOk(Response->GetResponseCode()))
+            {
+                FString ResultIP = Response->GetContentAsString();
+                ResultIP = ResultIP.Replace(TEXT("\n"), TEXT("")).Replace(TEXT("\r"), TEXT(""));
+                ResultIP.TrimStartAndEndInline();
+
+                if (ResultIP.Len() >= 7 && ResultIP.Len() <= 45)
+                {
+                    if (UAsyncGetPublicIPAction* Node = WeakThis.Get())
+                    {
+                        Node->Finalize(true, ResultIP);
+                    }
+                    return;
+                }
+            }
+
+            if (bIsAuto)
+            {
+                (*AttemptRequest)(Index + 1);
+            }
+            else
+            {
+                LogNetworkError(TEXT("Get Public IP"), TEXT("The selected public IP provider did not return a valid response."));
+                if (UAsyncGetPublicIPAction* Node = WeakThis.Get())
+                {
+                    Node->Finalize(false, FString());
+                }
+            }
+        });
+
+        if (!Request->ProcessRequest())
+        {
+            if (bIsAuto)
+            {
+                (*AttemptRequest)(Index + 1);
+            }
+            else
+            {
+                LogNetworkError(TEXT("Get Public IP"), TEXT("Failed to start the HTTP request."));
+                if (UAsyncGetPublicIPAction* Node = WeakThis.Get())
+                {
+                    Node->Finalize(false, FString());
+                }
+            }
+        }
+    };
+
+    (*AttemptRequest)(StartIndex);
+}
+
+void UAsyncGetPublicIPAction::Finalize(bool bSuccess, const FString& PublicIP)
+{
+    if (bSuccess)
+    {
+        OnSuccess.Broadcast(PublicIP);
+    }
+    else
+    {
+        OnFail.Broadcast(PublicIP);
+    }
+
+    if (bAddedToRootForCompatibility)
+    {
+        RemoveFromRoot();
+        bAddedToRootForCompatibility = false;
+    }
+
+    SetReadyToDestroy();
+}
+
 bool UNetworkUtilities::IsConnectedToInternet()
 {
 #if PLATFORM_WINDOWS
@@ -127,44 +568,6 @@ bool UNetworkUtilities::IsConnectedToInternet()
 #else
     return false;
 #endif
-}
-
-void UNetworkUtilities::QueryInternetAccess(FString TargetURL, float Timeout, FOnInternetAccessResult OnResult)
-{
-    if (TargetURL.IsEmpty())
-    {
-        TargetURL = GetDefaultInternetAccessUrl();
-    }
-
-    if (Timeout <= 0.1f)
-    {
-        Timeout = GetDefaultInternetAccessTimeoutSeconds();
-    }
-
-    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-
-    Request->SetURL(TargetURL);
-    Request->SetVerb("HEAD");
-    Request->SetTimeout(Timeout);
-
-    Request->OnProcessRequestComplete().BindLambda(
-        [OnResult](FHttpRequestPtr HttpRequest, FHttpResponsePtr Response, bool bWasSuccessful)
-        {
-            bool bRealConnection = false;
-
-            if (bWasSuccessful && Response.IsValid())
-            {
-                int32 Code = Response->GetResponseCode();
-
-                if (Code >= 200 && Code < 400)
-                {
-                    bRealConnection = true;
-                }
-            }
-            OnResult.ExecuteIfBound(bRealConnection);
-        });
-
-    Request->ProcessRequest();
 }
 
 ENetworkWindowsType UNetworkUtilities::GetConnectionType()
@@ -216,95 +619,6 @@ ENetworkWindowsType UNetworkUtilities::GetConnectionType()
     return ENetworkWindowsType::None;
 #else
     return ENetworkWindowsType::None;
-#endif
-}
-
-void UNetworkUtilities::PingAddress(FString Address, float Timeout, FOnPingResult OnResult)
-{
-#if PLATFORM_WINDOWS
-    if (Timeout <= 0.1f)
-    {
-        Timeout = GetDefaultPingTimeoutSeconds();
-    }
-
-    Async(EAsyncExecution::Thread, [Address, Timeout, OnResult]()
-    {
-        bool bSuccess = false;
-        int32 PingMs = -1;
-
-        HANDLE hIcmpFile = IcmpCreateFile();
-        if (hIcmpFile != INVALID_HANDLE_VALUE)
-        {
-            ADDRINFOA hints = {};
-            PADDRINFOA res = nullptr;
-            hints.ai_family = AF_INET;
-
-            if (GetAddrInfoA(TCHAR_TO_ANSI(*Address), nullptr, &hints, &res) == 0 && res != nullptr)
-            {
-                sockaddr_in* ipv4 = (sockaddr_in*)res->ai_addr;
-                IPAddr destIp = ipv4->sin_addr.S_un.S_addr;
-                FreeAddrInfoA(res);
-
-                char SendData[32] = "Ping Buffer Data for Testing";
-                DWORD ReplySize = sizeof(ICMP_ECHO_REPLY) + sizeof(SendData) + 8;
-                TArray<uint8> ReplyBuffer;
-                ReplyBuffer.SetNumZeroed(ReplySize);
-
-                DWORD dwRetVal = IcmpSendEcho(hIcmpFile, destIp, SendData, sizeof(SendData),
-                    nullptr, ReplyBuffer.GetData(), ReplySize, FMath::Max(100.0f, Timeout * 1000.0f));
-
-                if (dwRetVal != 0)
-                {
-                    PICMP_ECHO_REPLY pEchoReply = (PICMP_ECHO_REPLY)ReplyBuffer.GetData();
-                    if (pEchoReply->Status == IP_SUCCESS)
-                    {
-                        bSuccess = true;
-                        PingMs = pEchoReply->RoundTripTime;
-                    }
-                }
-            }
-            IcmpCloseHandle(hIcmpFile);
-        }
-
-        AsyncTask(ENamedThreads::GameThread, [bSuccess, PingMs, OnResult]()
-        {
-            OnResult.ExecuteIfBound(bSuccess, PingMs);
-        });
-    });
-#else
-    AsyncTask(ENamedThreads::GameThread, [OnResult]() { OnResult.ExecuteIfBound(false, -1); });
-#endif
-}
-
-void UNetworkUtilities::ResolveDomain(FString Hostname, FOnDNSResult OnResult)
-{
-#if PLATFORM_WINDOWS
-    Async(EAsyncExecution::Thread, [Hostname, OnResult]()
-    {
-        bool bSuccess = false;
-        FString ResolvedIP = TEXT("");
-
-        ADDRINFOA hints = {};
-        PADDRINFOA res = nullptr;
-        hints.ai_family = AF_INET;
-
-        if (GetAddrInfoA(TCHAR_TO_ANSI(*Hostname), nullptr, &hints, &res) == 0 && res != nullptr)
-        {
-            sockaddr_in* ipv4 = (sockaddr_in*)res->ai_addr;
-            char ipStr[INET_ADDRSTRLEN];
-            InetNtopA(AF_INET, &(ipv4->sin_addr), ipStr, INET_ADDRSTRLEN);
-            ResolvedIP = FString(UTF8_TO_TCHAR(ipStr));
-            bSuccess = true;
-            FreeAddrInfoA(res);
-        }
-
-        AsyncTask(ENamedThreads::GameThread, [bSuccess, ResolvedIP, OnResult]()
-        {
-            OnResult.ExecuteIfBound(bSuccess, ResolvedIP);
-        });
-    });
-#else
-    AsyncTask(ENamedThreads::GameThread, [OnResult]() { OnResult.ExecuteIfBound(false, TEXT("")); });
 #endif
 }
 
@@ -376,12 +690,6 @@ TArray<FNetworkInterfaceInfo> UNetworkUtilities::GetAvailableInterfaces()
     return ResultArray;
 }
 
-FString UNetworkUtilities::GetWifiNetworkName(FString InterfaceID)
-{
-    FWiFiNetworkInfo Info = GetDetailedWiFiInfo(InterfaceID);
-    return Info.SSID.IsEmpty() ? TEXT("None") : Info.SSID;
-}
-
 FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
 {
     FWiFiNetworkInfo Info;
@@ -398,7 +706,7 @@ FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
     dwResult = WlanOpenHandle(dwMaxClient, NULL, &dwCurVersion, &hClient);
     if (dwResult != ERROR_SUCCESS)
     {
-        Info.ErrorMessage = TEXT("WlanOpenHandle failed.");
+        LogNetworkError(TEXT("Get Detailed Wi-Fi Info"), TEXT("WlanOpenHandle failed."));
         return Info;
     }
 
@@ -462,7 +770,7 @@ FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
                         else
                         {
                             Info.SSID = TEXT("Disconnected");
-                            Info.ErrorMessage = TEXT("Wi-Fi interface is disconnected.");
+                            LogNetworkError(TEXT("Get Detailed Wi-Fi Info"), TEXT("The Wi-Fi interface is disconnected."));
                         }
 
                         WlanFreeMemory(pConnectInfo);
@@ -476,10 +784,68 @@ FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
     }
     WlanCloseHandle(hClient, NULL);
 #endif
-    if (!Info.bSuccess && Info.ErrorMessage.IsEmpty() && Info.SSID.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+    if (!Info.bSuccess && Info.SSID.Equals(TEXT("None"), ESearchCase::IgnoreCase))
     {
-        Info.ErrorMessage = TEXT("Wi-Fi information was not found.");
+        LogNetworkError(TEXT("Get Detailed Wi-Fi Info"), TEXT("Wi-Fi information was not found."));
     }
+
+    return Info;
+}
+
+FEthernetNetworkInfo UNetworkUtilities::GetDetailedEthernetInfo(FString InterfaceID)
+{
+    FEthernetNetworkInfo Info;
+
+#if PLATFORM_WINDOWS
+    ULONG OutBufLen = 15000;
+    TArray<uint8> Buffer;
+    Buffer.SetNumUninitialized(OutBufLen);
+    PIP_ADAPTER_ADDRESSES Addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(Buffer.GetData());
+
+    DWORD ResultCode = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, nullptr, Addresses, &OutBufLen);
+    if (ResultCode == ERROR_BUFFER_OVERFLOW)
+    {
+        Buffer.SetNumUninitialized(OutBufLen);
+        Addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(Buffer.GetData());
+        ResultCode = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, nullptr, Addresses, &OutBufLen);
+    }
+
+    if (ResultCode != NO_ERROR)
+    {
+        LogNetworkError(TEXT("Get Detailed Ethernet Info"), TEXT("Windows failed to enumerate network adapters."));
+        return Info;
+    }
+
+    for (PIP_ADAPTER_ADDRESSES Current = Addresses; Current; Current = Current->Next)
+    {
+        if (Current->IfType != IF_TYPE_ETHERNET_CSMACD || !Current->AdapterName)
+        {
+            continue;
+        }
+
+        const FString CurrentId = FString(UTF8_TO_TCHAR(Current->AdapterName));
+        if (!CurrentId.Equals(InterfaceID, ESearchCase::IgnoreCase))
+        {
+            continue;
+        }
+
+        Info.InterfaceID = CurrentId;
+        if (Current->FriendlyName)
+        {
+            Info.InterfaceName = FString(Current->FriendlyName);
+        }
+        Info.IPv4Address = GetLocalIpForInterface(CurrentId);
+        Info.MACAddress = FormatMacAddress(Current->PhysicalAddress, Current->PhysicalAddressLength);
+        Info.LinkSpeedMbps = static_cast<int64>(FMath::Max<uint64>(Current->TransmitLinkSpeed, Current->ReceiveLinkSpeed) / 1000000ULL);
+        Info.bDhcpEnabled = Current->Dhcpv4Server.iSockaddrLength > 0;
+        Info.bSuccess = true;
+        return Info;
+    }
+
+    LogNetworkError(TEXT("Get Detailed Ethernet Info"), TEXT("Ethernet information was not found for the requested interface."));
+#else
+    LogNetworkError(TEXT("Get Detailed Ethernet Info"), TEXT("Ethernet information is only available on Windows."));
+#endif
 
     return Info;
 }
@@ -537,84 +903,6 @@ FString UNetworkUtilities::GetLocalIpForInterface(FString InterfaceID)
 #else
     return TEXT("");
 #endif
-}
-
-void UNetworkUtilities::GetPublicIP(EPublicIPProvider Mode, float Timeout, FOnPublicIPResult OnResult)
-{
-    if (Timeout <= 0.1f)
-    {
-        Timeout = GetDefaultPublicIPTimeoutSeconds();
-    }
-
-    int32 StartIndex = 0;
-    bool bIsAuto = false;
-
-    switch (Mode)
-    {
-    case EPublicIPProvider::Auto:
-        StartIndex = 0;
-        bIsAuto = true;
-        break;
-    case EPublicIPProvider::IfConfig:
-        StartIndex = 0;
-        break;
-    case EPublicIPProvider::Amazon:
-        StartIndex = 1;
-        break;
-    case EPublicIPProvider::ICanHazIP:
-        StartIndex = 2;
-        break;
-    default:
-        StartIndex = 0;
-        bIsAuto = true;
-        break;
-    }
-
-    ProcessIPRequest(StartIndex, bIsAuto, Timeout, OnResult);
-}
-
-void UNetworkUtilities::ProcessIPRequest(int32 Index, bool bIsAutoMode, float Timeout, FOnPublicIPResult Callback)
-{
-    const TArray<FString> ProviderUrls = GetPublicIPProviderUrls();
-    if (!ProviderUrls.IsValidIndex(Index))
-    {
-        Callback.ExecuteIfBound(false, TEXT(""), TEXT("All providers failed."));
-        return;
-    }
-
-    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-
-    Request->SetURL(ProviderUrls[Index]);
-    Request->SetVerb("GET");
-    Request->SetTimeout(Timeout);
-
-    Request->OnProcessRequestComplete().BindLambda(
-        [Index, bIsAutoMode, Timeout, Callback](FHttpRequestPtr HttpRequest, FHttpResponsePtr Response, bool bWasSuccessful)
-        {
-            if (bWasSuccessful && Response.IsValid() && EHttpResponseCodes::IsOk(Response->GetResponseCode()))
-            {
-                FString ResultIP = Response->GetContentAsString();
-                ResultIP = ResultIP.Replace(TEXT("\n"), TEXT("")).Replace(TEXT("\r"), TEXT(""));
-                ResultIP.TrimStartAndEndInline();
-
-                if (ResultIP.Len() >= 7 && ResultIP.Len() <= 45)
-                {
-                    Callback.ExecuteIfBound(true, ResultIP, TEXT(""));
-                    return;
-                }
-            }
-
-            if (bIsAutoMode)
-            {
-                ProcessIPRequest(Index + 1, true, Timeout, Callback);
-            }
-            else
-            {
-                Callback.ExecuteIfBound(false, TEXT(""), TEXT("Provider unreachable."));
-            }
-        });
-
-    Request->ProcessRequest();
 }
 
 

@@ -6,12 +6,15 @@
 
 #include "HardwareInfoLibrary.h"
 #include "Async/Async.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/App.h"
 #include "RHI.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/CoreDelegates.h"
+#include <atomic>
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -22,6 +25,10 @@
 #include <shellapi.h>
 #include <pdh.h>
 #include <pdhmsg.h>
+#include <setupapi.h>
+#include <initguid.h>
+#include <devpkey.h>
+#include <wbemidl.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 
 using Microsoft::WRL::ComPtr;
@@ -32,6 +39,46 @@ using Microsoft::WRL::ComPtr;
 
 namespace WNT_Private
 {
+    static void LogSystemInfoError(const TCHAR* Context, const FString& Message)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Error: %s failed. %s"), Context, *Message);
+    }
+
+    struct FScopedComInit
+    {
+        HRESULT Result = E_FAIL;
+        bool bNeedsUninitialize = false;
+
+        FScopedComInit()
+        {
+            Result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            bNeedsUninitialize = SUCCEEDED(Result);
+        }
+
+        ~FScopedComInit()
+        {
+            if (bNeedsUninitialize)
+            {
+                CoUninitialize();
+            }
+        }
+
+        bool IsUsable() const
+        {
+            return SUCCEEDED(Result) || Result == RPC_E_CHANGED_MODE;
+        }
+    };
+
+    struct FWmiQueryRow
+    {
+        TMap<FString, FString> Values;
+    };
+
+    struct FWmiConnection
+    {
+        TUniquePtr<FScopedComInit> ComInit;
+        ComPtr<IWbemServices> Services;
+    };
 
     struct FAdapterEntry
     {
@@ -56,6 +103,357 @@ namespace WNT_Private
         case 0x5143: return EGPUVendor::Qualcomm;
         default:     return EGPUVendor::Unknown;
         }
+    }
+
+    static FString NormalizeWmiDate(const FString& RawDate)
+    {
+        if (RawDate.Len() < 8)
+        {
+            return RawDate;
+        }
+
+        return FString::Printf(TEXT("%s-%s-%s"), *RawDate.Mid(0, 4), *RawDate.Mid(4, 2), *RawDate.Mid(6, 2));
+    }
+
+    static FString VariantToString(const VARIANT& VariantValue)
+    {
+        switch (VariantValue.vt)
+        {
+        case VT_BSTR:
+            return VariantValue.bstrVal ? FString(VariantValue.bstrVal) : FString();
+        case VT_BOOL:
+            return VariantValue.boolVal == VARIANT_TRUE ? TEXT("True") : TEXT("False");
+        case VT_UI1:
+            return FString::FromInt(VariantValue.bVal);
+        case VT_I2:
+            return FString::FromInt(VariantValue.iVal);
+        case VT_UI2:
+            return FString::FromInt(VariantValue.uiVal);
+        case VT_I4:
+        case VT_INT:
+            return FString::FromInt(VariantValue.intVal);
+        case VT_UI4:
+        case VT_UINT:
+            return FString::Printf(TEXT("%u"), VariantValue.uintVal);
+        case VT_I8:
+            return FString::Printf(TEXT("%lld"), static_cast<long long>(VariantValue.llVal));
+        case VT_UI8:
+            return FString::Printf(TEXT("%llu"), static_cast<unsigned long long>(VariantValue.ullVal));
+        default:
+            return FString();
+        }
+    }
+
+    static bool EnsureWmiConnection(FWmiConnection& OutConnection, FString& OutError)
+    {
+        static bool bSecurityInitialized = false;
+        static bool bSecurityAttempted = false;
+
+        OutConnection.ComInit = MakeUnique<FScopedComInit>();
+        if (!OutConnection.ComInit->IsUsable())
+        {
+            OutError = TEXT("Failed to initialize COM for WMI.");
+            return false;
+        }
+
+        if (!bSecurityAttempted)
+        {
+            bSecurityAttempted = true;
+            const HRESULT SecurityHr = CoInitializeSecurity(
+                nullptr,
+                -1,
+                nullptr,
+                nullptr,
+                RPC_C_AUTHN_LEVEL_DEFAULT,
+                RPC_C_IMP_LEVEL_IMPERSONATE,
+                nullptr,
+                EOAC_NONE,
+                nullptr);
+            bSecurityInitialized = SUCCEEDED(SecurityHr) || SecurityHr == RPC_E_TOO_LATE;
+        }
+
+        if (!bSecurityInitialized)
+        {
+            OutError = TEXT("Failed to initialize COM security for WMI.");
+            return false;
+        }
+
+        ComPtr<IWbemLocator> Locator;
+        HRESULT Hr = CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&Locator));
+        if (FAILED(Hr) || !Locator)
+        {
+            OutError = FString::Printf(TEXT("Failed to create a WMI locator. HRESULT: 0x%08X"), static_cast<uint32>(Hr));
+            return false;
+        }
+
+        BSTR NamespacePath = SysAllocString(L"ROOT\\CIMV2");
+        Hr = Locator->ConnectServer(
+            NamespacePath,
+            nullptr,
+            nullptr,
+            nullptr,
+            0,
+            nullptr,
+            nullptr,
+            &OutConnection.Services);
+        SysFreeString(NamespacePath);
+        if (FAILED(Hr) || !OutConnection.Services)
+        {
+            OutError = FString::Printf(TEXT("Failed to connect to the WMI CIMV2 namespace. HRESULT: 0x%08X"), static_cast<uint32>(Hr));
+            return false;
+        }
+
+        Hr = CoSetProxyBlanket(
+            OutConnection.Services.Get(),
+            RPC_C_AUTHN_WINNT,
+            RPC_C_AUTHZ_NONE,
+            nullptr,
+            RPC_C_AUTHN_LEVEL_CALL,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            nullptr,
+            EOAC_NONE);
+        if (FAILED(Hr))
+        {
+            OutError = FString::Printf(TEXT("Failed to configure WMI proxy security. HRESULT: 0x%08X"), static_cast<uint32>(Hr));
+            return false;
+        }
+
+        return true;
+    }
+
+    static bool ExecWmiQuery(const FString& Query, const TArray<FString>& PropertyNames, TArray<FWmiQueryRow>& OutRows, FString& OutError)
+    {
+        OutRows.Reset();
+
+        FWmiConnection Connection;
+        if (!EnsureWmiConnection(Connection, OutError))
+        {
+            return false;
+        }
+
+        ComPtr<IEnumWbemClassObject> Enumerator;
+        BSTR QueryLanguage = SysAllocString(L"WQL");
+        BSTR QueryString = SysAllocString(*Query);
+        const HRESULT Hr = Connection.Services->ExecQuery(
+            QueryLanguage,
+            QueryString,
+            WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+            nullptr,
+            &Enumerator);
+        SysFreeString(QueryLanguage);
+        SysFreeString(QueryString);
+        if (FAILED(Hr) || !Enumerator)
+        {
+            OutError = FString::Printf(TEXT("WMI query failed. HRESULT: 0x%08X"), static_cast<uint32>(Hr));
+            return false;
+        }
+
+        while (true)
+        {
+            ULONG ReturnedCount = 0;
+            ComPtr<IWbemClassObject> Object;
+            const HRESULT NextHr = Enumerator->Next(WBEM_INFINITE, 1, Object.GetAddressOf(), &ReturnedCount);
+            if (FAILED(NextHr) || ReturnedCount == 0 || !Object)
+            {
+                break;
+            }
+
+            FWmiQueryRow Row;
+            for (const FString& PropertyName : PropertyNames)
+            {
+                VARIANT Value;
+                VariantInit(&Value);
+                if (SUCCEEDED(Object->Get(*PropertyName, 0, &Value, nullptr, nullptr)))
+                {
+                    Row.Values.Add(PropertyName, VariantToString(Value));
+                }
+                VariantClear(&Value);
+            }
+
+            OutRows.Add(MoveTemp(Row));
+        }
+
+        return true;
+    }
+
+    static FString FindWmiValue(const TArray<FWmiQueryRow>& Rows, const FString& MatchProperty, const FString& MatchValue, const FString& ReturnProperty)
+    {
+        const FString NormalizedMatch = MatchValue.TrimStartAndEnd();
+        for (const FWmiQueryRow& Row : Rows)
+        {
+            const FString* CandidateValue = Row.Values.Find(MatchProperty);
+            if (CandidateValue && CandidateValue->TrimStartAndEnd().Equals(NormalizedMatch, ESearchCase::IgnoreCase))
+            {
+                if (const FString* ReturnValue = Row.Values.Find(ReturnProperty))
+                {
+                    return *ReturnValue;
+                }
+            }
+        }
+
+        return FString();
+    }
+
+    static FString BuildGpuIdToken(uint32 VendorId, uint32 DeviceId)
+    {
+        return FString::Printf(TEXT("VEN_%04X&DEV_%04X"), VendorId, DeviceId).ToUpper();
+    }
+
+    static bool DoesPnpDeviceIdMatchAdapter(const FString& PnpDeviceId, const FAdapterEntry& Entry)
+    {
+        const FString DeviceIdUpper = PnpDeviceId.TrimStartAndEnd().ToUpper();
+        if (DeviceIdUpper.IsEmpty())
+        {
+            return false;
+        }
+
+        return DeviceIdUpper.Contains(BuildGpuIdToken(Entry.Desc.VendorId, Entry.Desc.DeviceId));
+    }
+
+    static FString ParseNullSeparatedWideStringList(const uint8* Buffer, DWORD BufferSizeBytes)
+    {
+        if (!Buffer || BufferSizeBytes < sizeof(WCHAR))
+        {
+            return FString();
+        }
+
+        const WCHAR* Cursor = reinterpret_cast<const WCHAR*>(Buffer);
+        const int32 CharCount = static_cast<int32>(BufferSizeBytes / sizeof(WCHAR));
+        TArray<FString> Parts;
+
+        int32 Index = 0;
+        while (Index < CharCount && Cursor[Index] != L'\0')
+        {
+            const WCHAR* Current = Cursor + Index;
+            const FString Value(Current);
+            if (!Value.IsEmpty())
+            {
+                Parts.Add(Value);
+            }
+
+            Index += Value.Len() + 1;
+        }
+
+        return FString::Join(Parts, TEXT(" | "));
+    }
+
+    static FString QueryDevicePropertyString(HDEVINFO DeviceInfoSet, SP_DEVINFO_DATA& DeviceInfoData, const DEVPROPKEY& PropertyKey)
+    {
+        DEVPROPTYPE PropertyType = 0;
+        DWORD RequiredBytes = 0;
+        SetupDiGetDevicePropertyW(DeviceInfoSet, &DeviceInfoData, &PropertyKey, &PropertyType, nullptr, 0, &RequiredBytes, 0);
+        if (RequiredBytes == 0)
+        {
+            return FString();
+        }
+
+        TArray<uint8> Buffer;
+        Buffer.SetNumZeroed(RequiredBytes);
+        if (!SetupDiGetDevicePropertyW(DeviceInfoSet, &DeviceInfoData, &PropertyKey, &PropertyType, Buffer.GetData(), RequiredBytes, &RequiredBytes, 0))
+        {
+            return FString();
+        }
+
+        if (PropertyType == DEVPROP_TYPE_STRING)
+        {
+            return FString(reinterpret_cast<const WCHAR*>(Buffer.GetData())).TrimStartAndEnd();
+        }
+
+        if (PropertyType == DEVPROP_TYPE_STRING_LIST)
+        {
+            return ParseNullSeparatedWideStringList(Buffer.GetData(), RequiredBytes).TrimStartAndEnd();
+        }
+
+        return FString();
+    }
+
+    static FString QueryDeviceRegistryPropertyString(HDEVINFO DeviceInfoSet, SP_DEVINFO_DATA& DeviceInfoData, DWORD Property)
+    {
+        DWORD PropertyType = 0;
+        DWORD RequiredBytes = 0;
+        SetupDiGetDeviceRegistryPropertyW(DeviceInfoSet, &DeviceInfoData, Property, &PropertyType, nullptr, 0, &RequiredBytes);
+        if (RequiredBytes == 0)
+        {
+            return FString();
+        }
+
+        TArray<uint8> Buffer;
+        Buffer.SetNumZeroed(RequiredBytes);
+        if (!SetupDiGetDeviceRegistryPropertyW(DeviceInfoSet, &DeviceInfoData, Property, &PropertyType, Buffer.GetData(), RequiredBytes, &RequiredBytes))
+        {
+            return FString();
+        }
+
+        if (PropertyType == REG_SZ || PropertyType == REG_EXPAND_SZ)
+        {
+            return FString(reinterpret_cast<const WCHAR*>(Buffer.GetData())).TrimStartAndEnd();
+        }
+
+        if (PropertyType == REG_MULTI_SZ)
+        {
+            return ParseNullSeparatedWideStringList(Buffer.GetData(), RequiredBytes).TrimStartAndEnd();
+        }
+
+        return FString();
+    }
+
+    static FString GetPhysicalLocationFromSetupApi(const FString& PnpDeviceId)
+    {
+        if (PnpDeviceId.TrimStartAndEnd().IsEmpty())
+        {
+            return FString();
+        }
+
+        const HDEVINFO DeviceInfoSet = SetupDiGetClassDevsW(nullptr, nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+        if (DeviceInfoSet == INVALID_HANDLE_VALUE)
+        {
+            return FString();
+        }
+
+        FString PhysicalLocation;
+        SP_DEVINFO_DATA DeviceInfoData = {};
+        DeviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+        constexpr DWORD DeviceInstanceIdCapacity = 512;
+
+        for (DWORD DeviceIndex = 0; SetupDiEnumDeviceInfo(DeviceInfoSet, DeviceIndex, &DeviceInfoData); ++DeviceIndex)
+        {
+            WCHAR DeviceInstanceId[DeviceInstanceIdCapacity] = {};
+            if (!SetupDiGetDeviceInstanceIdW(DeviceInfoSet, &DeviceInfoData, DeviceInstanceId, DeviceInstanceIdCapacity, nullptr))
+            {
+                continue;
+            }
+
+            const FString CandidateId(DeviceInstanceId);
+            if (!CandidateId.Equals(PnpDeviceId, ESearchCase::IgnoreCase))
+            {
+                continue;
+            }
+
+            FString LocationInfo = QueryDevicePropertyString(DeviceInfoSet, DeviceInfoData, DEVPKEY_Device_LocationInfo);
+            if (LocationInfo.IsEmpty())
+            {
+                LocationInfo = QueryDeviceRegistryPropertyString(DeviceInfoSet, DeviceInfoData, SPDRP_LOCATION_INFORMATION);
+            }
+
+            const FString LocationPath = QueryDevicePropertyString(DeviceInfoSet, DeviceInfoData, DEVPKEY_Device_LocationPaths);
+            if (!LocationInfo.IsEmpty() && !LocationPath.IsEmpty())
+            {
+                PhysicalLocation = FString::Printf(TEXT("%s [%s]"), *LocationInfo, *LocationPath);
+            }
+            else if (!LocationInfo.IsEmpty())
+            {
+                PhysicalLocation = LocationInfo;
+            }
+            else
+            {
+                PhysicalLocation = LocationPath;
+            }
+
+            break;
+        }
+
+        SetupDiDestroyDeviceInfoList(DeviceInfoSet);
+        return PhysicalLocation.TrimStartAndEnd();
     }
 
     static void EnumerateAdapters()
@@ -110,6 +508,7 @@ namespace WNT_Private
     static PDH_HCOUNTER SharedCounter = nullptr;
     static PDH_HCOUNTER GPUEngineCounter = nullptr;
     static PDH_HCOUNTER CPUCounter = nullptr;
+    static TMap<int32, PDH_HCOUNTER> CpuThreadCounters;
     static bool bPerfInitialized = false;
 
     static bool InitPerfCounters()
@@ -171,8 +570,48 @@ namespace WNT_Private
         return Total;
     }
 
+    static bool MatchesGpuUsageMode(const FString& EngineType, EGPUUsageMode UsageMode)
+    {
+        const FString LowerEngineType = EngineType.ToLower();
 
-    static float QueryGPUUtil(const FString& LuidStr)
+        switch (UsageMode)
+        {
+        case EGPUUsageMode::Overall:
+            return true;
+        case EGPUUsageMode::ThreeDimensional:
+            return LowerEngineType.Contains(TEXT("3d"));
+        case EGPUUsageMode::Copy:
+            return LowerEngineType.Contains(TEXT("copy"));
+        case EGPUUsageMode::Compute:
+            return LowerEngineType.Contains(TEXT("compute"));
+        case EGPUUsageMode::VideoDecode:
+            return LowerEngineType.Contains(TEXT("videodecode"));
+        case EGPUUsageMode::VideoEncode:
+            return LowerEngineType.Contains(TEXT("videoencode"));
+        case EGPUUsageMode::VideoProcessing:
+            return LowerEngineType.Contains(TEXT("videoprocessing"));
+        case EGPUUsageMode::Graphics:
+            return LowerEngineType.Contains(TEXT("graphics"));
+        case EGPUUsageMode::Overlay:
+            return LowerEngineType.Contains(TEXT("overlay"));
+        case EGPUUsageMode::Cryptographic:
+            return LowerEngineType.Contains(TEXT("cryptographic"));
+        case EGPUUsageMode::Other:
+            return !(LowerEngineType.Contains(TEXT("3d"))
+                || LowerEngineType.Contains(TEXT("copy"))
+                || LowerEngineType.Contains(TEXT("compute"))
+                || LowerEngineType.Contains(TEXT("videodecode"))
+                || LowerEngineType.Contains(TEXT("videoencode"))
+                || LowerEngineType.Contains(TEXT("videoprocessing"))
+                || LowerEngineType.Contains(TEXT("graphics"))
+                || LowerEngineType.Contains(TEXT("overlay"))
+                || LowerEngineType.Contains(TEXT("cryptographic")));
+        default:
+            return true;
+        }
+    }
+
+    static float QueryGPUUtil(const FString& LuidStr, EGPUUsageMode UsageMode)
     {
         if (!GPUEngineCounter) return 0.0f;
 
@@ -194,10 +633,12 @@ namespace WNT_Private
             FString Name(Items[i].szName);
             if (!Name.Contains(LuidStr)) continue;
 
-
-            int32 EngIdx = INDEX_NONE;
-            Name.FindLastChar(TEXT('_'), EngIdx);
-            FString EngType = (EngIdx != INDEX_NONE) ? Name.Mid(Name.Find(TEXT("engtype_"))) : TEXT("unknown");
+            const int32 EngineTypeIndex = Name.Find(TEXT("engtype_"));
+            FString EngType = EngineTypeIndex != INDEX_NONE ? Name.Mid(EngineTypeIndex + 8) : TEXT("unknown");
+            if (!MatchesGpuUsageMode(EngType, UsageMode))
+            {
+                continue;
+            }
 
             double& Sum = EngineUtils.FindOrAdd(EngType);
             Sum += Items[i].FmtValue.doubleValue;
@@ -209,6 +650,137 @@ namespace WNT_Private
             MaxUtil = FMath::Max(MaxUtil, Pair.Value);
         }
         return static_cast<float>(FMath::Clamp(MaxUtil, 0.0, 100.0));
+    }
+
+    static bool EnsureCpuThreadCounter(int32 ThreadIndex, FString& OutError)
+    {
+        if (ThreadIndex < 0)
+        {
+            OutError = TEXT("CPU thread index must be zero or greater.");
+            return false;
+        }
+
+        if (!InitPerfCounters() || !PerfQuery)
+        {
+            OutError = TEXT("CPU performance counters are not available.");
+            return false;
+        }
+
+        if (CpuThreadCounters.Contains(ThreadIndex))
+        {
+            return true;
+        }
+
+        PDH_HCOUNTER Counter = nullptr;
+        const FString CounterPath = FString::Printf(TEXT("\\Processor(%d)\\%% Processor Time"), ThreadIndex);
+        const PDH_STATUS Status = ::PdhAddEnglishCounter(PerfQuery, *CounterPath, 0, &Counter);
+        if (Status != ERROR_SUCCESS || !Counter)
+        {
+            OutError = FString::Printf(TEXT("Failed to create a CPU thread counter for index %d."), ThreadIndex);
+            return false;
+        }
+
+        CpuThreadCounters.Add(ThreadIndex, Counter);
+        ::PdhCollectQueryData(PerfQuery);
+        return true;
+    }
+
+    static FString GetMemoryFormFactorDisplayName(int32 FormFactor)
+    {
+        switch (FormFactor)
+        {
+        case 8:  return TEXT("DIMM");
+        case 12: return TEXT("SODIMM");
+        case 13: return TEXT("SRIMM");
+        case 9:  return TEXT("TSOP");
+        case 10: return TEXT("PGA");
+        case 26: return TEXT("DDR4");
+        case 27: return TEXT("DDR5");
+        default: return TEXT("Unknown");
+        }
+    }
+
+    static bool PopulateGpuAdvancedInfo(const FAdapterEntry& Entry, FGPUAdapterAdvancedInfo& OutAdvanced)
+    {
+        OutAdvanced = FGPUAdapterAdvancedInfo();
+        OutAdvanced.HardwareReservedMemoryMB = static_cast<int64>(Entry.Desc.DedicatedSystemMemory >> 20);
+
+        FString WmiError;
+        TArray<FWmiQueryRow> VideoControllers;
+        if (!ExecWmiQuery(TEXT("SELECT Name, DriverVersion, DriverDate, PNPDeviceID, AdapterRAM FROM Win32_VideoController"), { TEXT("Name"), TEXT("DriverVersion"), TEXT("DriverDate"), TEXT("PNPDeviceID"), TEXT("AdapterRAM") }, VideoControllers, WmiError))
+        {
+            return false;
+        }
+
+        FString PnpDeviceId;
+        for (const FWmiQueryRow& Row : VideoControllers)
+        {
+            const FString* Name = Row.Values.Find(TEXT("Name"));
+            const FString* DeviceId = Row.Values.Find(TEXT("PNPDeviceID"));
+            const bool bPnpMatches = DeviceId && DoesPnpDeviceIdMatchAdapter(*DeviceId, Entry);
+            if (!Name)
+            {
+                if (!bPnpMatches)
+                {
+                    continue;
+                }
+            }
+
+            const FString AdapterName = FString(Entry.Desc.Description).TrimStartAndEnd();
+            const bool bNameMatches = Name && (Name->TrimStartAndEnd().Equals(AdapterName, ESearchCase::IgnoreCase) || Name->Contains(AdapterName) || AdapterName.Contains(*Name));
+            if (bNameMatches || bPnpMatches)
+            {
+                if (const FString* DriverVersion = Row.Values.Find(TEXT("DriverVersion")))
+                {
+                    OutAdvanced.DriverVersion = *DriverVersion;
+                }
+                if (const FString* DriverDate = Row.Values.Find(TEXT("DriverDate")))
+                {
+                    OutAdvanced.DriverDate = NormalizeWmiDate(*DriverDate);
+                }
+                if (DeviceId)
+                {
+                    PnpDeviceId = *DeviceId;
+                }
+                if (OutAdvanced.HardwareReservedMemoryMB <= 0 && Entry.Desc.DedicatedVideoMemory == 0)
+                {
+                    if (const FString* AdapterRam = Row.Values.Find(TEXT("AdapterRAM")))
+                    {
+                        const uint64 AdapterRamBytes = FCString::Strtoui64(**AdapterRam, nullptr, 10);
+                        if (AdapterRamBytes > 0)
+                        {
+                            OutAdvanced.HardwareReservedMemoryMB = static_cast<int64>(AdapterRamBytes >> 20);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        if (!PnpDeviceId.IsEmpty())
+        {
+            OutAdvanced.PhysicalLocation = GetPhysicalLocationFromSetupApi(PnpDeviceId);
+
+            TArray<FWmiQueryRow> PnpEntities;
+            if (OutAdvanced.PhysicalLocation.IsEmpty()
+                && ExecWmiQuery(TEXT("SELECT PNPDeviceID, LocationInformation FROM Win32_PnPEntity"), { TEXT("PNPDeviceID"), TEXT("LocationInformation") }, PnpEntities, WmiError))
+            {
+                OutAdvanced.PhysicalLocation = FindWmiValue(PnpEntities, TEXT("PNPDeviceID"), PnpDeviceId, TEXT("LocationInformation"));
+            }
+        }
+
+        return true;
+    }
+
+    static FGPUAdapterInfo BuildGpuAdapterInfo(const FAdapterEntry& Entry)
+    {
+        FGPUAdapterInfo Info;
+        Info.AdapterIndex = Entry.Index;
+        Info.AdapterName = FString(Entry.Desc.Description);
+        Info.Vendor = VendorIdToEnum(Entry.Desc.VendorId);
+        Info.bIsActiveRHI = Entry.bIsActiveRHI;
+        PopulateGpuAdvancedInfo(Entry, Info.Advanced);
+        return Info;
     }
 }
 
@@ -258,7 +830,7 @@ namespace WNT_Command
         {
             if (OutResult)
             {
-                OutResult->ErrorMessage = FString::Printf(TEXT("Failed to start elevated command. Windows error: %lu"), GetLastError());
+                OutResult->StdErr = FString::Printf(TEXT("Windows error: %lu"), GetLastError());
             }
             return false;
         }
@@ -287,7 +859,7 @@ namespace WNT_Command
 #else
         if (OutResult)
         {
-            OutResult->ErrorMessage = TEXT("Elevated commands are only available on Windows.");
+            OutResult->StdErr = TEXT("Elevated commands are only available on Windows.");
         }
         return false;
 #endif
@@ -299,7 +871,7 @@ namespace WNT_Command
 
         if (Executable.IsEmpty() || Parameters.IsEmpty())
         {
-            Result.ErrorMessage = TEXT("Command is empty or unsupported on this platform.");
+            Result.StdErr = TEXT("Command is empty or unsupported on this platform.");
             return Result;
         }
 
@@ -320,7 +892,7 @@ namespace WNT_Command
             {
                 FPlatformProcess::ClosePipe(StdErrReadPipe, StdErrWritePipe);
             }
-            Result.ErrorMessage = TEXT("Failed to create output pipes.");
+            Result.StdErr = TEXT("Failed to create output pipes.");
             return Result;
         }
 
@@ -342,7 +914,7 @@ namespace WNT_Command
         {
             FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
             FPlatformProcess::ClosePipe(StdErrReadPipe, StdErrWritePipe);
-            Result.ErrorMessage = TEXT("Failed to start command process.");
+            Result.StdErr = TEXT("Failed to start command process.");
             return Result;
         }
 
@@ -377,7 +949,7 @@ namespace WNT_Command
         }
         else
         {
-            Result.ErrorMessage = TEXT("Command timed out and was terminated.");
+            Result.StdErr = TEXT("Command timed out and was terminated.");
         }
 
         FPlatformProcess::CloseProc(ProcHandle);
@@ -392,7 +964,7 @@ namespace WNT_Command
         const FString TrimmedCommand = Command.TrimStartAndEnd();
         if (TrimmedCommand.IsEmpty())
         {
-            Result.ErrorMessage = TEXT("Command is empty.");
+            Result.StdErr = TEXT("Command is empty.");
             return Result;
         }
 
@@ -400,7 +972,7 @@ namespace WNT_Command
         const FString Parameters = BuildShellParameters(Options.Shell, TrimmedCommand);
         if (Executable.IsEmpty())
         {
-            Result.ErrorMessage = TEXT("Command execution is only available on Windows.");
+            Result.StdErr = TEXT("Command execution is only available on Windows.");
             return Result;
         }
 
@@ -440,16 +1012,79 @@ namespace WNT_Command
         }
         else
         {
-            Result.ErrorMessage = TEXT("Failed to start command process.");
+            Result.StdErr = TEXT("Failed to start command process.");
         }
 
         return Result;
     }
 }
 
-void USystemInfoBPLibrary::GetMemoryInfo(
-    int64& TotalPhysicalMB, int64& UsedPhysicalMB, int64& FreePhysicalMB,
-    int64& TotalVirtualMB, int64& UsedVirtualMB, int64& FreeVirtualMB)
+UAsyncRunCommandAction* UAsyncRunCommandAction::RunCommandAsync(const UObject* WorldContextObject, const FString& Command, FWNTCommandOptions Options)
+{
+    UAsyncRunCommandAction* Node = NewObject<UAsyncRunCommandAction>();
+    Node->CommandText = Command;
+    Node->CommandOptions = Options;
+
+    if (WorldContextObject)
+    {
+        Node->RegisterWithGameInstance(WorldContextObject);
+    }
+    else
+    {
+        Node->AddToRoot();
+        Node->bAddedToRootForCompatibility = true;
+    }
+
+    return Node;
+}
+
+void UAsyncRunCommandAction::Activate()
+{
+    TWeakObjectPtr<UAsyncRunCommandAction> WeakThis(this);
+    const FString CommandCopy = CommandText;
+    const FWNTCommandOptions OptionsCopy = CommandOptions;
+
+    Async(EAsyncExecution::Thread, [WeakThis, CommandCopy, OptionsCopy]()
+    {
+        const FWNTCommandResult Result = WNT_Command::RunCommand(CommandCopy, OptionsCopy);
+        const bool bSucceeded = Result.bStarted && !Result.bTimedOut && (Result.ExitCode == 0 || !Result.bCompleted);
+
+        if (!bSucceeded && !Result.StdErr.IsEmpty())
+        {
+            WNT_Private::LogSystemInfoError(TEXT("Run Command Async"), Result.StdErr);
+        }
+
+        AsyncTask(ENamedThreads::GameThread, [WeakThis, Result, bSucceeded]()
+        {
+            if (UAsyncRunCommandAction* Node = WeakThis.Get())
+            {
+                Node->Finalize(Result, bSucceeded);
+            }
+        });
+    });
+}
+
+void UAsyncRunCommandAction::Finalize(const FWNTCommandResult& InResult, bool bSuccess)
+{
+    if (bSuccess)
+    {
+        OnSuccess.Broadcast(InResult);
+    }
+    else
+    {
+        OnFail.Broadcast(InResult);
+    }
+
+    if (bAddedToRootForCompatibility)
+    {
+        RemoveFromRoot();
+        bAddedToRootForCompatibility = false;
+    }
+
+    SetReadyToDestroy();
+}
+
+void USystemInfoBPLibrary::GetPhysicalMemoryInfo(int64& TotalPhysicalMB, int64& UsedPhysicalMB, int64& FreePhysicalMB)
 {
 #if PLATFORM_WINDOWS
     MEMORYSTATUSEX MemInfo;
@@ -457,30 +1092,97 @@ void USystemInfoBPLibrary::GetMemoryInfo(
     if (::GlobalMemoryStatusEx(&MemInfo))
     {
         TotalPhysicalMB = static_cast<int64>(MemInfo.ullTotalPhys >> 20);
-        FreePhysicalMB  = static_cast<int64>(MemInfo.ullAvailPhys >> 20);
-        UsedPhysicalMB  = TotalPhysicalMB - FreePhysicalMB;
-        TotalVirtualMB  = static_cast<int64>(MemInfo.ullTotalPageFile >> 20);
-        FreeVirtualMB   = static_cast<int64>(MemInfo.ullAvailPageFile >> 20);
-        UsedVirtualMB   = TotalVirtualMB - FreeVirtualMB;
+        FreePhysicalMB = static_cast<int64>(MemInfo.ullAvailPhys >> 20);
+        UsedPhysicalMB = TotalPhysicalMB - FreePhysicalMB;
         return;
     }
 #endif
     TotalPhysicalMB = UsedPhysicalMB = FreePhysicalMB = 0;
-    TotalVirtualMB  = UsedVirtualMB  = FreeVirtualMB  = 0;
 }
 
+void USystemInfoBPLibrary::GetVirtualMemoryInfo(int64& TotalVirtualMB, int64& UsedVirtualMB, int64& FreeVirtualMB)
+{
+#if PLATFORM_WINDOWS
+    MEMORYSTATUSEX MemInfo;
+    MemInfo.dwLength = sizeof(MEMORYSTATUSEX);
+    if (::GlobalMemoryStatusEx(&MemInfo))
+    {
+        TotalVirtualMB = static_cast<int64>(MemInfo.ullTotalPageFile >> 20);
+        FreeVirtualMB = static_cast<int64>(MemInfo.ullAvailPageFile >> 20);
+        UsedVirtualMB = TotalVirtualMB - FreeVirtualMB;
+        return;
+    }
+#endif
+    TotalVirtualMB = UsedVirtualMB = FreeVirtualMB = 0;
+}
 
+void USystemInfoBPLibrary::GetMemoryInfo(int32& MemorySpeedMHz, FMemorySlotInfo& SlotInfo, int64& HardwareReservedMemoryMB)
+{
+    MemorySpeedMHz = 0;
+    SlotInfo = FMemorySlotInfo();
+    HardwareReservedMemoryMB = 0;
 
+#if PLATFORM_WINDOWS
+    FString WmiError;
+    TArray<WNT_Private::FWmiQueryRow> Modules;
+    if (WNT_Private::ExecWmiQuery(TEXT("SELECT Capacity, ConfiguredClockSpeed, Speed, FormFactor FROM Win32_PhysicalMemory"), { TEXT("Capacity"), TEXT("ConfiguredClockSpeed"), TEXT("Speed"), TEXT("FormFactor") }, Modules, WmiError))
+    {
+        uint64 InstalledCapacityBytes = 0;
+        for (const WNT_Private::FWmiQueryRow& Row : Modules)
+        {
+            ++SlotInfo.UsedSlots;
 
+            if (MemorySpeedMHz <= 0)
+            {
+                const FString* ConfiguredSpeed = Row.Values.Find(TEXT("ConfiguredClockSpeed"));
+                const FString* Speed = Row.Values.Find(TEXT("Speed"));
+                const FString SpeedString = (ConfiguredSpeed && !ConfiguredSpeed->IsEmpty()) ? *ConfiguredSpeed : (Speed ? *Speed : FString());
+                MemorySpeedMHz = FCString::Atoi(*SpeedString);
+            }
 
-void USystemInfoBPLibrary::GetCPUInfo(
-    FString& DeviceName, ECPUVendor& Vendor,
-    int32& PhysicalCores, int32& LogicalThreads)
+            if (SlotInfo.FormFactor.IsEmpty())
+            {
+                if (const FString* FormFactor = Row.Values.Find(TEXT("FormFactor")))
+                {
+                    SlotInfo.FormFactor = WNT_Private::GetMemoryFormFactorDisplayName(FCString::Atoi(**FormFactor));
+                }
+            }
+
+            if (const FString* Capacity = Row.Values.Find(TEXT("Capacity")))
+            {
+                InstalledCapacityBytes += FCString::Strtoui64(**Capacity, nullptr, 10);
+            }
+        }
+
+        MEMORYSTATUSEX MemInfo = {};
+        MemInfo.dwLength = sizeof(MEMORYSTATUSEX);
+        if (::GlobalMemoryStatusEx(&MemInfo) && InstalledCapacityBytes > MemInfo.ullTotalPhys)
+        {
+            HardwareReservedMemoryMB = static_cast<int64>((InstalledCapacityBytes - MemInfo.ullTotalPhys) >> 20);
+        }
+    }
+
+    TArray<WNT_Private::FWmiQueryRow> Arrays;
+    if (WNT_Private::ExecWmiQuery(TEXT("SELECT MemoryDevices FROM Win32_PhysicalMemoryArray"), { TEXT("MemoryDevices") }, Arrays, WmiError) && Arrays.Num() > 0)
+    {
+        if (const FString* MemoryDevices = Arrays[0].Values.Find(TEXT("MemoryDevices")))
+        {
+            SlotInfo.TotalSlots = FCString::Atoi(**MemoryDevices);
+        }
+    }
+#endif
+}
+
+void USystemInfoBPLibrary::GetCPUInfo(FString& DeviceName, ECPUVendor& Vendor, int32& PhysicalCores, int32& LogicalThreads, FCPUCacheInfo& CacheInfo)
 {
     DeviceName = FPlatformMisc::GetCPUBrand().TrimStartAndEnd();
-    if (DeviceName.IsEmpty()) DeviceName = TEXT("Unknown Processor");
+    if (DeviceName.IsEmpty())
+    {
+        DeviceName = TEXT("Unknown Processor");
+    }
 
-    PhysicalCores  = FPlatformMisc::NumberOfCores();
+    CacheInfo = FCPUCacheInfo();
+    PhysicalCores = FPlatformMisc::NumberOfCores();
     LogicalThreads = FPlatformMisc::NumberOfCoresIncludingHyperthreads();
 
     const FString VendorId = FPlatformMisc::GetCPUVendor();
@@ -494,9 +1196,42 @@ void USystemInfoBPLibrary::GetCPUInfo(
         Vendor = ECPUVendor::Qualcomm;
     else
         Vendor = ECPUVendor::Generic;
+
+#if PLATFORM_WINDOWS
+    DWORD BufferSize = 0;
+    ::GetLogicalProcessorInformationEx(RelationCache, nullptr, &BufferSize);
+    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && BufferSize > 0)
+    {
+        TArray<uint8> Buffer;
+        Buffer.SetNumZeroed(BufferSize);
+
+        if (::GetLogicalProcessorInformationEx(RelationCache, reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(Buffer.GetData()), &BufferSize))
+        {
+            uint8* Cursor = Buffer.GetData();
+            const uint8* End = Cursor + BufferSize;
+            while (Cursor < End)
+            {
+                const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX* Entry = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(Cursor);
+                if (Entry->Relationship == RelationCache)
+                {
+                    const int32 CacheSizeKB = static_cast<int32>(Entry->Cache.CacheSize / 1024);
+                    switch (Entry->Cache.Level)
+                    {
+                    case 1: CacheInfo.L1CacheKB += CacheSizeKB; break;
+                    case 2: CacheInfo.L2CacheKB += CacheSizeKB; break;
+                    case 3: CacheInfo.L3CacheKB += CacheSizeKB; break;
+                    default: break;
+                    }
+                }
+
+                Cursor += Entry->Size;
+            }
+        }
+    }
+#endif
 }
 
-float USystemInfoBPLibrary::GetCPUUsagePercent()
+float USystemInfoBPLibrary::GetOverallCPUUsage()
 {
 #if PLATFORM_WINDOWS
     FScopeLock Lock(&WNT_Private::PerfMutex);
@@ -514,10 +1249,64 @@ float USystemInfoBPLibrary::GetCPUUsagePercent()
     return 0.0f;
 }
 
+float USystemInfoBPLibrary::GetCPUThreadUsage(int32 Thread)
+{
+#if PLATFORM_WINDOWS
+    FScopeLock Lock(&WNT_Private::PerfMutex);
+    FString ErrorMessage;
+    if (!WNT_Private::EnsureCpuThreadCounter(Thread, ErrorMessage))
+    {
+        WNT_Private::LogSystemInfoError(TEXT("Get CPU Thread Usage"), ErrorMessage);
+        return 0.0f;
+    }
 
+    WNT_Private::CollectPerfData();
+    if (PDH_HCOUNTER* Counter = WNT_Private::CpuThreadCounters.Find(Thread))
+    {
+        PDH_FMT_COUNTERVALUE Value;
+        if (::PdhGetFormattedCounterValue(*Counter, PDH_FMT_DOUBLE, nullptr, &Value) == ERROR_SUCCESS)
+        {
+            return static_cast<float>(FMath::Clamp(Value.doubleValue, 0.0, 100.0));
+        }
+    }
+#endif
 
+    return 0.0f;
+}
 
+int32 USystemInfoBPLibrary::GetCPUCurrentSpeedMHz()
+{
+#if PLATFORM_WINDOWS
+    FString WmiError;
+    TArray<WNT_Private::FWmiQueryRow> Rows;
+    if (WNT_Private::ExecWmiQuery(TEXT("SELECT CurrentClockSpeed FROM Win32_Processor"), { TEXT("CurrentClockSpeed") }, Rows, WmiError) && Rows.Num() > 0)
+    {
+        if (const FString* Value = Rows[0].Values.Find(TEXT("CurrentClockSpeed")))
+        {
+            return FCString::Atoi(**Value);
+        }
+    }
+#endif
 
+    return 0;
+}
+
+bool USystemInfoBPLibrary::IsCPUVirtualizationEnabled()
+{
+#if PLATFORM_WINDOWS
+    FString WmiError;
+    TArray<WNT_Private::FWmiQueryRow> Rows;
+    if (WNT_Private::ExecWmiQuery(TEXT("SELECT VirtualizationFirmwareEnabled FROM Win32_Processor"), { TEXT("VirtualizationFirmwareEnabled") }, Rows, WmiError) && Rows.Num() > 0)
+    {
+        if (const FString* Value = Rows[0].Values.Find(TEXT("VirtualizationFirmwareEnabled")))
+        {
+            return Value->Equals(TEXT("True"), ESearchCase::IgnoreCase);
+        }
+    }
+#endif
+
+    return false;
+}
 TArray<FGPUAdapterInfo> USystemInfoBPLibrary::GetAllGPUAdapters()
 {
     TArray<FGPUAdapterInfo> Result;
@@ -528,43 +1317,26 @@ TArray<FGPUAdapterInfo> USystemInfoBPLibrary::GetAllGPUAdapters()
     Result.Reserve(WNT_Private::CachedAdapters.Num());
     for (const auto& Entry : WNT_Private::CachedAdapters)
     {
-        FGPUAdapterInfo Info;
-        Info.AdapterIndex = Entry.Index;
-        Info.AdapterName = FString(Entry.Desc.Description);
-        Info.Vendor = WNT_Private::VendorIdToEnum(Entry.Desc.VendorId);
-        Info.DedicatedVideoMemoryMB = static_cast<int64>(Entry.Desc.DedicatedVideoMemory >> 20);
-        Info.SharedSystemMemoryMB = static_cast<int64>(Entry.Desc.SharedSystemMemory >> 20);
-        Info.bIsActiveRHI = Entry.bIsActiveRHI;
-        Result.Add(MoveTemp(Info));
+        Result.Add(WNT_Private::BuildGpuAdapterInfo(Entry));
     }
 #endif
     return Result;
 }
 
-FGPUAdapterRuntimeInfo USystemInfoBPLibrary::GetGPUAdapterRuntimeInfo(int32 Adapter)
+FGPUAdapterInfo USystemInfoBPLibrary::GetGPUInformations(int32 Adapter)
 {
-    FGPUAdapterRuntimeInfo Result;
+    FGPUAdapterInfo Result;
 #if PLATFORM_WINDOWS
     if (auto* Entry = WNT_Private::GetAdapter(Adapter))
     {
-        Result.bSuccess = true;
-        Result.AdapterInfo.AdapterIndex = Entry->Index;
-        Result.AdapterInfo.AdapterName = FString(Entry->Desc.Description);
-        Result.AdapterInfo.Vendor = WNT_Private::VendorIdToEnum(Entry->Desc.VendorId);
-        Result.AdapterInfo.DedicatedVideoMemoryMB = static_cast<int64>(Entry->Desc.DedicatedVideoMemory >> 20);
-        Result.AdapterInfo.SharedSystemMemoryMB = static_cast<int64>(Entry->Desc.SharedSystemMemory >> 20);
-        Result.AdapterInfo.bIsActiveRHI = Entry->bIsActiveRHI;
-        Result.UsedDedicatedVRAMMB = GetUsedDedicatedVRAM(Adapter);
-        Result.UsedSharedVRAMMB = GetUsedVirtualVRAM(Adapter);
-        Result.GameVRAMUsageMB = Entry->bIsActiveRHI ? GetGameVRAMUsage() : 0;
-        Result.UsagePercent = GetGPUUsagePercent(Adapter);
+        Result = WNT_Private::BuildGpuAdapterInfo(*Entry);
     }
     else
     {
-        Result.ErrorMessage = TEXT("GPU adapter index is invalid.");
+        WNT_Private::LogSystemInfoError(TEXT("Get GPU Information"), TEXT("GPU adapter index is invalid."));
     }
 #else
-    Result.ErrorMessage = TEXT("GPU runtime information is only available on Windows.");
+    WNT_Private::LogSystemInfoError(TEXT("Get GPU Information"), TEXT("GPU runtime information is only available on Windows."));
 #endif
     return Result;
 }
@@ -595,10 +1367,10 @@ EGPUVendor USystemInfoBPLibrary::GetGPUManufacturer(int32 Adapter)
 
 
 
-int64 USystemInfoBPLibrary::GetTotalDedicatedVRAM(int32 Context)
+int64 USystemInfoBPLibrary::GetTotalDedicatedVRAM(int32 Adapter)
 {
 #if PLATFORM_WINDOWS
-    if (auto* Entry = WNT_Private::GetAdapter(Context))
+    if (auto* Entry = WNT_Private::GetAdapter(Adapter))
     {
         return static_cast<int64>(Entry->Desc.DedicatedVideoMemory >> 20);
     }
@@ -606,13 +1378,13 @@ int64 USystemInfoBPLibrary::GetTotalDedicatedVRAM(int32 Context)
     return 0;
 }
 
-int64 USystemInfoBPLibrary::GetUsedDedicatedVRAM(int32 Context)
+int64 USystemInfoBPLibrary::GetUsedDedicatedVRAM(int32 Adapter)
 {
 #if PLATFORM_WINDOWS
     FScopeLock Lock(&WNT_Private::PerfMutex);
     if (!WNT_Private::InitPerfCounters()) return 0;
 
-    auto* Entry = WNT_Private::GetAdapter(Context);
+    auto* Entry = WNT_Private::GetAdapter(Adapter);
     if (!Entry) return 0;
 
     WNT_Private::CollectPerfData();
@@ -627,10 +1399,10 @@ int64 USystemInfoBPLibrary::GetUsedDedicatedVRAM(int32 Context)
 
 
 
-int64 USystemInfoBPLibrary::GetTotalVirtualVRAM(int32 Context)
+int64 USystemInfoBPLibrary::GetTotalVirtualVRAM(int32 Adapter)
 {
 #if PLATFORM_WINDOWS
-    if (auto* Entry = WNT_Private::GetAdapter(Context))
+    if (auto* Entry = WNT_Private::GetAdapter(Adapter))
     {
         return static_cast<int64>(Entry->Desc.SharedSystemMemory >> 20);
     }
@@ -638,13 +1410,13 @@ int64 USystemInfoBPLibrary::GetTotalVirtualVRAM(int32 Context)
     return 0;
 }
 
-int64 USystemInfoBPLibrary::GetUsedVirtualVRAM(int32 Context)
+int64 USystemInfoBPLibrary::GetUsedVirtualVRAM(int32 Adapter)
 {
 #if PLATFORM_WINDOWS
     FScopeLock Lock(&WNT_Private::PerfMutex);
     if (!WNT_Private::InitPerfCounters()) return 0;
 
-    auto* Entry = WNT_Private::GetAdapter(Context);
+    auto* Entry = WNT_Private::GetAdapter(Adapter);
     if (!Entry) return 0;
 
     WNT_Private::CollectPerfData();
@@ -679,7 +1451,7 @@ int64 USystemInfoBPLibrary::GetGameVRAMUsage()
 
 
 
-float USystemInfoBPLibrary::GetGPUUsagePercent(int32 Adapter)
+float USystemInfoBPLibrary::GetGPUUsagePercent(int32 Adapter, EGPUUsageMode UsageMode)
 {
 #if PLATFORM_WINDOWS
     FScopeLock Lock(&WNT_Private::PerfMutex);
@@ -690,7 +1462,7 @@ float USystemInfoBPLibrary::GetGPUUsagePercent(int32 Adapter)
 
     WNT_Private::CollectPerfData();
     const FString LuidStr = WNT_Private::FormatLUID(Entry->Desc.AdapterLuid);
-    return WNT_Private::QueryGPUUtil(LuidStr);
+    return WNT_Private::QueryGPUUtil(LuidStr, UsageMode);
 #else
     return 0.0f;
 #endif
@@ -700,9 +1472,10 @@ float USystemInfoBPLibrary::GetGPUUsagePercent(int32 Adapter)
 
 
 
-void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, bool& HasKeyboard)
+void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse)
 {
-    HasGamepad = false; HasMouse = false; HasKeyboard = false;
+    HasGamepad = false;
+    HasMouse = false;
 #if PLATFORM_WINDOWS
     UINT DeviceCount = 0;
     if (::GetRawInputDeviceList(nullptr, &DeviceCount, sizeof(RAWINPUTDEVICELIST)) != static_cast<UINT>(-1) && DeviceCount > 0)
@@ -715,7 +1488,6 @@ void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse, boo
             for (UINT i = 0; i < Result; ++i)
             {
                 if (Devices[i].dwType == RIM_TYPEMOUSE) HasMouse = true;
-                else if (Devices[i].dwType == RIM_TYPEKEYBOARD) HasKeyboard = true;
             }
         }
     }
@@ -822,7 +1594,12 @@ bool USystemInfoBPLibrary::ExecuteWindowsCMD(const FString& Command, bool bRunAs
     Options.bRunAsAdmin = bRunAsAdmin;
     Options.bHidden = bHidden;
     Options.bCaptureOutput = false;
-    return WNT_Command::RunCommand(Command, Options).bStarted;
+    const FWNTCommandResult Result = WNT_Command::RunCommand(Command, Options);
+    if (!Result.bStarted && !Result.StdErr.IsEmpty())
+    {
+        WNT_Private::LogSystemInfoError(TEXT("Run Command Prompt Command"), Result.StdErr);
+    }
+    return Result.bStarted;
 }
 
 bool USystemInfoBPLibrary::ExecutePowerShell(const FString& Command, bool bRunAsAdmin, bool bHidden)
@@ -832,19 +1609,12 @@ bool USystemInfoBPLibrary::ExecutePowerShell(const FString& Command, bool bRunAs
     Options.bRunAsAdmin = bRunAsAdmin;
     Options.bHidden = bHidden;
     Options.bCaptureOutput = false;
-    return WNT_Command::RunCommand(Command, Options).bStarted;
-}
-
-void USystemInfoBPLibrary::RunCommandAsync(const FString& Command, FWNTCommandOptions Options, FOnWNTCommandResult OnResult)
-{
-    Async(EAsyncExecution::Thread, [Command, Options, OnResult]()
+    const FWNTCommandResult Result = WNT_Command::RunCommand(Command, Options);
+    if (!Result.bStarted && !Result.StdErr.IsEmpty())
     {
-        const FWNTCommandResult Result = WNT_Command::RunCommand(Command, Options);
-        AsyncTask(ENamedThreads::GameThread, [OnResult, Result]()
-        {
-            OnResult.ExecuteIfBound(Result);
-        });
-    });
+        WNT_Private::LogSystemInfoError(TEXT("Run PowerShell Command"), Result.StdErr);
+    }
+    return Result.bStarted;
 }
 
 bool USystemInfoBPLibrary::CanForceKillGame()

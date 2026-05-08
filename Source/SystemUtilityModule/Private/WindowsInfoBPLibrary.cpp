@@ -127,17 +127,32 @@ FString UWindowsInfoBPLibrary::GetLocalUserName()
     return UserName.IsEmpty() ? TEXT("Unknown") : UserName;
 }
 
-float UWindowsInfoBPLibrary::GetTotalSystemMemoryGB()
+FString UWindowsInfoBPLibrary::GetCurrentKeyboardLayout()
 {
 #if PLATFORM_WINDOWS
-    MEMORYSTATUSEX MemStatus;
-    MemStatus.dwLength = sizeof(MEMORYSTATUSEX);
-    if (GlobalMemoryStatusEx(&MemStatus))
+    TCHAR KeyboardLayoutName[KL_NAMELENGTH] = { 0 };
+    if (GetKeyboardLayoutName(KeyboardLayoutName) && KeyboardLayoutName[0])
     {
-        return static_cast<float>(MemStatus.ullTotalPhys) / (1024.0f * 1024.0f * 1024.0f);
+        return FString(KeyboardLayoutName);
     }
 #endif
-    return 0.0f;
+    return TEXT("Unknown");
+}
+
+FString UWindowsInfoBPLibrary::GetSystemLanguage()
+{
+#if PLATFORM_WINDOWS
+    const LANGID LangID = GetSystemDefaultLangID();
+    if (LangID != 0)
+    {
+        WCHAR LocaleName[LOCALE_NAME_MAX_LENGTH] = { 0 };
+        if (LCIDToLocaleName(MAKELCID(LangID, SORT_DEFAULT), LocaleName, LOCALE_NAME_MAX_LENGTH, 0) && LocaleName[0])
+        {
+            return FString(LocaleName);
+        }
+    }
+#endif
+    return TEXT("Unknown");
 }
 
 FString UWindowsInfoBPLibrary::ReadRegistryString(const FString& KeyPath, const FString& ValueName, bool bLocalMachine)

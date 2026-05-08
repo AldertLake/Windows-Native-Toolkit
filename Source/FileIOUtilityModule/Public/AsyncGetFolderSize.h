@@ -12,8 +12,6 @@
 #include "AsyncGetFolderSize.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFolderSizeCalculated, int64, FolderSizeBytes);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFolderSizeError, const FString&, ErrorMessage);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnFolderSizeCanceled);
 
 /** Async Blueprint action that scans a folder size on a background thread. */
 UCLASS()
@@ -34,21 +32,9 @@ public:
     UPROPERTY(BlueprintAssignable)
     FOnFolderSizeCalculated OnFail;
 
-    /** Called with a readable failure reason when calculation fails. */
-    UPROPERTY(BlueprintAssignable)
-    FOnFolderSizeError OnError;
-
-    /** Called when Cancel is requested before the scan completes. */
-    UPROPERTY(BlueprintAssignable)
-    FOnFolderSizeCanceled OnCanceled;
-
-    /** Calculates a folder size on a background thread. Prefer the world-context version in Blueprints. */
-    UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"), Category = "Windows Native Toolkit|Files Management")
-    static UAsyncGetFolderSize* GetFolderSizeAsync(const FString& FolderPath);
-
     /** Calculates a folder size on a background thread and keeps the async action alive through the GameInstance. */
-    UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Get Folder Size Async"), Category = "Windows Native Toolkit|Files Management")
-    static UAsyncGetFolderSize* GetFolderSizeAsyncWithWorldContext(const UObject* WorldContextObject, const FString& FolderPath);
+    UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Get Folder Size"), Category = "Windows Native Toolkit|Files Management")
+    static UAsyncGetFolderSize* GetFolderSize(const UObject* WorldContextObject, const FString& FolderPath);
 
     /** Requests cancellation. Completion delegates are always broadcast on the game thread. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management")
