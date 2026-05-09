@@ -9,14 +9,14 @@
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "UObject/SoftObjectPtr.h"
-#include "ConfigSaveLibrary.generated.h"
+#include "ConfigurationLibrary.generated.h"
 
 /**
  * Blueprint access to Unreal config files with wildcard value serialization,
  * native config arrays, per-value AES encryption, and asset path helpers.
  */
 UCLASS()
-class FILEIOUTILITYMODULE_API UConfigSaveLibrary : public UBlueprintFunctionLibrary
+class FILEIOUTILITYMODULE_API UConfigurationLibrary : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 

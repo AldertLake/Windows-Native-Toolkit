@@ -42,19 +42,19 @@ class NETWORKUTILITYMODULE_API UBluetoothManager : public UBlueprintFunctionLibr
 public:
 
     /** Returns true when Windows reports a physical Bluetooth adapter. */
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library", meta = (DisplayName = "Has Bluetooth Adapter"))
     static bool HasBluetoothAdapter();
 
     /** Returns true when a Bluetooth radio is available and enabled. */
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library", meta = (DisplayName = "Is Bluetooth Enabled"))
     static bool IsBluetoothEnabled();
 
     /** Returns paired and remembered Bluetooth devices. */
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library", meta = (DisplayName = "Get Paired Bluetooth Devices"))
     static TArray<FBluetoothDeviceInfo> GetPairedDevices();
 
     /** Returns true when a paired Bluetooth device address is currently connected. */
-    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library")
+    UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Network & Connectivity|Bluetooth Library", meta = (DisplayName = "Is Bluetooth Device Connected"))
     static bool IsBluetoothDeviceConnected(FString DeviceAddress);
 };
 

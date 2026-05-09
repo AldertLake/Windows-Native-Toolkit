@@ -4,13 +4,15 @@
 // Discord:    https://discord.gg/QpPPfh6WVn
 // -----------------------------------------------------
 
-#include "FileSystemBlueprintLibrary.h"
+#include "FileSystemLibrary.h"
 #include "Async/Async.h"
 #include "Engine/Engine.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFile.h"
 #include "HAL/PlatformFileManager.h"
 #include "GenericPlatform/GenericPlatformFile.h"
 #include "Misc/Paths.h"
+#include "UObject/WeakObjectPtr.h"
 #include <atomic>
 
 #if PLATFORM_WINDOWS
@@ -28,7 +30,7 @@ static IPlatformFile& GetPlatformFile()
     return FPlatformFileManager::Get().GetPlatformFile();
 }
 
-static FString FixPath(const FString& Path)
+static FString NormalizeFileSystemPath(const FString& Path)
 {
     FString Fixed = FPaths::ConvertRelativePathToFull(Path);
     FPaths::NormalizeFilename(Fixed);
@@ -39,7 +41,7 @@ static FString FixPath(const FString& Path)
     return Fixed;
 }
 
-static bool IsRootPath(const FString& Path)
+static bool IsDriveRootPath(const FString& Path)
 {
     if (Path.Equals(TEXT("/")) || Path.Equals(TEXT("\\")))
     {
@@ -54,7 +56,7 @@ static bool IsRootPath(const FString& Path)
     return FPaths::IsDrive(Path);
 }
 
-static bool IsWindowsSystemPath(const FString& Path)
+static bool IsWindowsProtectedPath(const FString& Path)
 {
 #if PLATFORM_WINDOWS
     TCHAR WindowsDirectory[MAX_PATH] = { 0 };
@@ -63,8 +65,8 @@ static bool IsWindowsSystemPath(const FString& Path)
         return false;
     }
 
-    FString SystemPath = FixPath(FString(WindowsDirectory));
-    FString TargetPath = FixPath(Path);
+    FString SystemPath = NormalizeFileSystemPath(FString(WindowsDirectory));
+    FString TargetPath = NormalizeFileSystemPath(Path);
 
     if (!SystemPath.EndsWith(TEXT("/")))
     {
@@ -90,7 +92,7 @@ static bool ValidatePathString(const FString& RawPath, FString& OutPath, FString
         return false;
     }
 
-    OutPath = FixPath(RawPath);
+    OutPath = NormalizeFileSystemPath(RawPath);
     FText Reason;
     if (!FPaths::ValidatePath(OutPath, &Reason))
     {
@@ -108,13 +110,13 @@ static bool ValidateDestructivePath(const FString& RawPath, FString& OutPath, FS
         return false;
     }
 
-    if (IsRootPath(OutPath))
+    if (IsDriveRootPath(OutPath))
     {
         OutError = TEXT("Refusing to modify a drive root.");
         return false;
     }
 
-    if (IsWindowsSystemPath(OutPath))
+    if (IsWindowsProtectedPath(OutPath))
     {
         OutError = TEXT("Refusing to modify the Windows system directory.");
         return false;
@@ -123,9 +125,31 @@ static bool ValidateDestructivePath(const FString& RawPath, FString& OutPath, FS
     return true;
 }
 
+static bool ValidateManagedDirectoryPath(const FString& RawPath, FString& OutPath, FString& OutError)
+{
+    if (!ValidatePathString(RawPath, OutPath, OutError))
+    {
+        return false;
+    }
+
+    if (IsDriveRootPath(OutPath))
+    {
+        OutError = TEXT("Refusing to use a drive root for this operation.");
+        return false;
+    }
+
+    if (IsWindowsProtectedPath(OutPath))
+    {
+        OutError = TEXT("Refusing to use the Windows system directory for this operation.");
+        return false;
+    }
+
+    return true;
+}
+
 static bool AreSamePath(const FString& A, const FString& B)
 {
-    return FixPath(A).Equals(FixPath(B), ESearchCase::IgnoreCase);
+    return NormalizeFileSystemPath(A).Equals(NormalizeFileSystemPath(B), ESearchCase::IgnoreCase);
 }
 
 static bool IsValidCleanFilename(const FString& Name)
@@ -148,7 +172,7 @@ static bool MoveFileToFolderInternal(const FString& Source, const FString& Desti
 
     FString CleanSource;
     FString CleanDestFolder;
-    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidatePathString(Destination, CleanDestFolder, OutError))
+    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidateManagedDirectoryPath(Destination, CleanDestFolder, OutError))
     {
         return false;
     }
@@ -228,7 +252,7 @@ static bool MoveFolderToFolderInternal(const FString& Source, const FString& Des
 
     FString CleanSource;
     FString CleanDestParent;
-    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidatePathString(Destination, CleanDestParent, OutError))
+    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidateManagedDirectoryPath(Destination, CleanDestParent, OutError))
     {
         return false;
     }
@@ -305,7 +329,7 @@ static bool CopyFileToFolderInternal(const FString& Source, const FString& Desti
 
     FString CleanSource;
     FString CleanDestFolder;
-    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidatePathString(Destination, CleanDestFolder, OutError))
+    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidateManagedDirectoryPath(Destination, CleanDestFolder, OutError))
     {
         return false;
     }
@@ -389,7 +413,7 @@ static bool CopyFolderToFolderInternal(const FString& Source, const FString& Des
 
     FString CleanSource;
     FString CleanDestParent;
-    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidatePathString(Destination, CleanDestParent, OutError))
+    if (!ValidateDestructivePath(Source, CleanSource, OutError) || !ValidateManagedDirectoryPath(Destination, CleanDestParent, OutError))
     {
         return false;
     }
@@ -696,10 +720,10 @@ void UAsyncFileSystemOperation::Finalize(bool bSuccess)
     SetReadyToDestroy();
 }
 
-FWNTFileInfo UFileSystemBlueprintLibrary::GetFileInfo(const FString& FilePath)
+FWNTFileInfo UFileSystemLibrary::GetFileInfo(const FString& FilePath)
 {
     IPlatformFile& PlatformFile = GetPlatformFile();
-    FString Target = FixPath(FilePath);
+    FString Target = NormalizeFileSystemPath(FilePath);
     FWNTFileInfo Info;
     Info.AbsolutePath = Target;
     Info.FileName = FPaths::GetCleanFilename(Target);
@@ -720,10 +744,10 @@ FWNTFileInfo UFileSystemBlueprintLibrary::GetFileInfo(const FString& FilePath)
     return Info;
 }
 
-FWNTFolderInfo UFileSystemBlueprintLibrary::GetFolderInfo(const FString& FolderPath)
+FWNTFolderInfo UFileSystemLibrary::GetFolderInfo(const FString& FolderPath)
 {
     IPlatformFile& PlatformFile = GetPlatformFile();
-    FString Target = FixPath(FolderPath);
+    FString Target = NormalizeFileSystemPath(FolderPath);
     FWNTFolderInfo Info;
     Info.AbsolutePath = Target;
     Info.FolderName = FPaths::GetCleanFilename(Target);
@@ -742,7 +766,7 @@ FWNTFolderInfo UFileSystemBlueprintLibrary::GetFolderInfo(const FString& FolderP
     return Info;
 }
 
-TArray<FPartitionInfo> UFileSystemBlueprintLibrary::GetAllAvailablePartitions()
+TArray<FPartitionInfo> UFileSystemLibrary::GetAllAvailablePartitions()
 {
     TArray<FPartitionInfo> Partitions;
 
@@ -1044,15 +1068,159 @@ static bool RecycleFolderInternal(const FString& FolderPath, FString& OutError)
 #endif
 }
 
-void UFileSystemBlueprintLibrary::ShowFileInExplorer(const FString& FilePath)
+void UFileSystemLibrary::ShowFileInExplorer(const FString& FilePath)
 {
 #if PLATFORM_WINDOWS
-    FString CleanPath = FixPath(FilePath);
+    FString CleanPath = NormalizeFileSystemPath(FilePath);
     CleanPath.ReplaceInline(TEXT("/"), TEXT("\\"));
 
     FString Args = FString::Printf(TEXT("/select,\"%s\""), *CleanPath);
     FPlatformProcess::CreateProc(TEXT("explorer.exe"), *Args, true, false, false, nullptr, 0, nullptr, nullptr);
 #endif
+}
+
+UAsyncGetFolderSize* UAsyncGetFolderSize::GetFolderSize(const UObject* WorldContextObject, const FString& FolderPath)
+{
+    UAsyncGetFolderSize* Node = NewObject<UAsyncGetFolderSize>();
+    Node->TargetFolderPath = FolderPath;
+    Node->bCancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+    if (WorldContextObject)
+    {
+        Node->RegisterWithGameInstance(WorldContextObject);
+    }
+    else
+    {
+        Node->AddToRoot();
+        Node->bAddedToRootForCompatibility = true;
+    }
+    return Node;
+}
+
+void UAsyncGetFolderSize::Cancel()
+{
+    if (bCancelRequested.IsValid())
+    {
+        *bCancelRequested = true;
+    }
+}
+
+void UAsyncGetFolderSize::Activate()
+{
+    if (!bCancelRequested.IsValid())
+    {
+        bCancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+    }
+
+    FString PathCopy;
+    FString ErrorMessage;
+    if (!ValidateManagedDirectoryPath(TargetFolderPath, PathCopy, ErrorMessage))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Error: Get Folder Size failed. %s"), *ErrorMessage);
+        OnFail.Broadcast(0);
+        if (bAddedToRootForCompatibility)
+        {
+            RemoveFromRoot();
+            bAddedToRootForCompatibility = false;
+        }
+        SetReadyToDestroy();
+        return;
+    }
+
+    if (!FPlatformFileManager::Get().GetPlatformFile().DirectoryExists(*PathCopy))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Error: Get Folder Size failed. Folder does not exist: %s"), *PathCopy);
+        OnFail.Broadcast(0);
+        if (bAddedToRootForCompatibility)
+        {
+            RemoveFromRoot();
+            bAddedToRootForCompatibility = false;
+        }
+        SetReadyToDestroy();
+        return;
+    }
+
+    TWeakObjectPtr<UAsyncGetFolderSize> WeakThis(this);
+    TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag = bCancelRequested;
+
+    AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakThis, PathCopy, CancelFlag]()
+    {
+        struct FFolderSizeVisitor : public IPlatformFile::FDirectoryVisitor
+        {
+            int64 TotalSize = 0;
+            int32 VisitedFileCount = 0;
+            TWeakObjectPtr<UAsyncGetFolderSize> WeakNode;
+            TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag;
+
+            virtual bool Visit(const TCHAR* FilenameOrDirectory, bool bIsDirectory) override
+            {
+                if (CancelFlag.IsValid() && *CancelFlag)
+                {
+                    return false;
+                }
+
+                if (!bIsDirectory)
+                {
+                    const int64 FileSize = FPlatformFileManager::Get().GetPlatformFile().FileSize(FilenameOrDirectory);
+                    if (FileSize >= 0)
+                    {
+                        TotalSize += FileSize;
+                    }
+
+                    ++VisitedFileCount;
+                    if ((VisitedFileCount % 128) == 0)
+                    {
+                        const int64 CurrentSize = TotalSize;
+                        TWeakObjectPtr<UAsyncGetFolderSize> ProgressNode = WeakNode;
+                        AsyncTask(ENamedThreads::GameThread, [ProgressNode, CurrentSize]()
+                        {
+                            if (UAsyncGetFolderSize* Node = ProgressNode.Get())
+                            {
+                                Node->OnProgress.Broadcast(CurrentSize);
+                            }
+                        });
+                    }
+                }
+                return true;
+            }
+        };
+
+        FFolderSizeVisitor Visitor;
+        Visitor.WeakNode = WeakThis;
+        Visitor.CancelFlag = CancelFlag;
+
+        const bool bCompleted = FPlatformFileManager::Get().GetPlatformFile().IterateDirectoryRecursively(*PathCopy, Visitor);
+        const bool bCanceled = CancelFlag.IsValid() && *CancelFlag;
+        const int64 FinalSize = Visitor.TotalSize;
+
+        AsyncTask(ENamedThreads::GameThread, [WeakThis, FinalSize, bCompleted, bCanceled]()
+        {
+            if (UAsyncGetFolderSize* Node = WeakThis.Get())
+            {
+                if (bCanceled)
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Error: Get Folder Size failed. The operation was canceled."));
+                    Node->OnFail.Broadcast(0);
+                }
+                else if (bCompleted)
+                {
+                    Node->OnProgress.Broadcast(FinalSize);
+                    Node->OnSuccess.Broadcast(FinalSize);
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Error: Get Folder Size failed to finish scanning the folder."));
+                    Node->OnFail.Broadcast(0);
+                }
+
+                if (Node->bAddedToRootForCompatibility)
+                {
+                    Node->RemoveFromRoot();
+                    Node->bAddedToRootForCompatibility = false;
+                }
+                Node->SetReadyToDestroy();
+            }
+        });
+    });
 }
 
 

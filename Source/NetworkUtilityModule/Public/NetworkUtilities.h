@@ -129,12 +129,15 @@ class NETWORKUTILITYMODULE_API UAsyncQueryInternetAccessAction : public UBluepri
     GENERATED_BODY()
 
 public:
+    /** Called when the probe confirms the requested URL is reachable within the timeout. */
     UPROPERTY(BlueprintAssignable)
     FWNTInternetAccessCompleted OnSuccess;
 
+    /** Called when the probe cannot confirm internet access before the timeout expires. */
     UPROPERTY(BlueprintAssignable)
     FWNTInternetAccessCompleted OnFail;
 
+    /** Checks internet reachability on a background thread and returns whether the machine can reach the target URL. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Query Player Internet Access"))
     static UAsyncQueryInternetAccessAction* QueryInternetAccess(const UObject* WorldContextObject, FString TargetURL, float Timeout);
 
@@ -155,12 +158,15 @@ class NETWORKUTILITYMODULE_API UAsyncPingAddressAction : public UBlueprintAsyncA
     GENERATED_BODY()
 
 public:
+    /** Called when the address responds before the timeout and a ping value is available. */
     UPROPERTY(BlueprintAssignable)
     FWNTPingCompleted OnSuccess;
 
+    /** Called when the address cannot be pinged before the timeout expires. */
     UPROPERTY(BlueprintAssignable)
     FWNTPingCompleted OnFail;
 
+    /** Sends an asynchronous ping request to a URL host or direct IP address and returns the round-trip time in milliseconds. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Ping URL or IP"))
     static UAsyncPingAddressAction* PingAddress(const UObject* WorldContextObject, FString Address, float Timeout);
 
@@ -181,12 +187,15 @@ class NETWORKUTILITYMODULE_API UAsyncResolveDomainAction : public UBlueprintAsyn
     GENERATED_BODY()
 
 public:
+    /** Called when the hostname resolves successfully to an IP address. */
     UPROPERTY(BlueprintAssignable)
     FWNTDomainResolved OnSuccess;
 
+    /** Called when the hostname cannot be resolved. */
     UPROPERTY(BlueprintAssignable)
     FWNTDomainResolved OnFail;
 
+    /** Resolves a domain name asynchronously and returns the first IPv4 or IPv6 address that Windows provides. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Resolve Domain Name"))
     static UAsyncResolveDomainAction* ResolveDomain(const UObject* WorldContextObject, FString Hostname);
 
@@ -206,12 +215,15 @@ class NETWORKUTILITYMODULE_API UAsyncGetPublicIPAction : public UBlueprintAsyncA
     GENERATED_BODY()
 
 public:
+    /** Called when a public-IP provider returns a valid public IP address. */
     UPROPERTY(BlueprintAssignable)
     FWNTPublicIPResolved OnSuccess;
 
+    /** Called when no provider returns a valid public IP address before the timeout expires. */
     UPROPERTY(BlueprintAssignable)
     FWNTPublicIPResolved OnFail;
 
+    /** Queries the selected public-IP provider asynchronously and returns the machine's current public IP address. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Network & Connectivity|Internet Network", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Get Public IP"))
     static UAsyncGetPublicIPAction* GetPublicIP(const UObject* WorldContextObject, EPublicIPProvider Mode, float Timeout);
 

@@ -58,15 +58,19 @@ class SYSTEMUTILITYMODULE_API UAsyncNativeMessageBoxAction : public UBlueprintAs
     GENERATED_BODY()
 
 public:
+    /** Called when the user confirms the native dialog with Yes or OK. */
     UPROPERTY(BlueprintAssignable)
     FWNTMessageBoxResultEvent OnConfirmed;
 
+    /** Called when the user explicitly declines the native dialog with No. */
     UPROPERTY(BlueprintAssignable)
     FWNTMessageBoxResultEvent OnDeclined;
 
+    /** Called when the user cancels or closes the native dialog without confirming. */
     UPROPERTY(BlueprintAssignable)
     FWNTMessageBoxResultEvent OnCanceled;
 
+    /** Shows a native Windows message box asynchronously and routes the selected button into dedicated execution pins. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Message Boxes", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Show Native Message Box Async"))
     static UAsyncNativeMessageBoxAction* ShowNativeMessageBoxAsync(
         const UObject* WorldContextObject,
@@ -95,12 +99,15 @@ class SYSTEMUTILITYMODULE_API UAsyncRegularMessageBoxAction : public UBlueprintA
     GENERATED_BODY()
 
 public:
+    /** Called when the first custom button is selected. */
     UPROPERTY(BlueprintAssignable)
     FWNTMessageBoxResultEvent OnFirstButton;
 
+    /** Called when the second custom button is selected or the dialog is dismissed. */
     UPROPERTY(BlueprintAssignable)
     FWNTMessageBoxResultEvent OnSecondButton;
 
+    /** Shows an asynchronous custom Windows dialog with one or two custom button labels. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Message Boxes", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Show Regular Message Box Async"))
     static UAsyncRegularMessageBoxAction* ShowMessageBoxAsync(
         const UObject* WorldContextObject,

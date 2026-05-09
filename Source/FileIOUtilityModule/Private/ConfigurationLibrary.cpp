@@ -4,7 +4,7 @@
 // Discord:    https://discord.gg/QpPPfh6WVn
 // -----------------------------------------------------
 
-#include "ConfigSaveLibrary.h"
+#include "ConfigurationLibrary.h"
 
 #include "FileIOUtilityModule.h"
 #include "WindowsNativeToolkitSettings.h"
@@ -958,13 +958,13 @@ namespace WNTConfig::Private
 
 using namespace WNTConfig::Private;
 
-bool UConfigSaveLibrary::WriteConfigValue(const FString& Section, const FString& Key, const int32& Value, const FString& Filename)
+bool UConfigurationLibrary::WriteConfigValue(const FString& Section, const FString& Key, const int32& Value, const FString& Filename)
 {
 	UE_LOG(LogWNTConfig, Error, TEXT("Write Config Value failed: This wildcard node must be executed through the Blueprint VM custom thunk path. Native C++ calls cannot use the placeholder int32 signature."));
 	return false;
 }
 
-DEFINE_FUNCTION(UConfigSaveLibrary::execWriteConfigValue)
+DEFINE_FUNCTION(UConfigurationLibrary::execWriteConfigValue)
 {
 	P_GET_PROPERTY(FStrProperty, Section);
 	P_GET_PROPERTY(FStrProperty, Key);
@@ -983,13 +983,13 @@ DEFINE_FUNCTION(UConfigSaveLibrary::execWriteConfigValue)
 	P_NATIVE_END;
 }
 
-bool UConfigSaveLibrary::ReadConfigValue(const FString& Section, const FString& Key, int32& Value, const FString& Filename)
+bool UConfigurationLibrary::ReadConfigValue(const FString& Section, const FString& Key, int32& Value, const FString& Filename)
 {
 	UE_LOG(LogWNTConfig, Error, TEXT("Read Config Value failed: This wildcard node must be executed through the Blueprint VM custom thunk path. Native C++ calls cannot use the placeholder int32 signature."));
 	return false;
 }
 
-DEFINE_FUNCTION(UConfigSaveLibrary::execReadConfigValue)
+DEFINE_FUNCTION(UConfigurationLibrary::execReadConfigValue)
 {
 	P_GET_PROPERTY(FStrProperty, Section);
 	P_GET_PROPERTY(FStrProperty, Key);
@@ -1008,13 +1008,13 @@ DEFINE_FUNCTION(UConfigSaveLibrary::execReadConfigValue)
 	P_NATIVE_END;
 }
 
-bool UConfigSaveLibrary::WriteConfigArray(const FString& Section, const FString& Key, const TArray<int32>& Values, const FString& Filename)
+bool UConfigurationLibrary::WriteConfigArray(const FString& Section, const FString& Key, const TArray<int32>& Values, const FString& Filename)
 {
 	UE_LOG(LogWNTConfig, Error, TEXT("Write Config Array failed: This wildcard array node must be executed through the Blueprint VM custom thunk path. Native C++ calls cannot use the placeholder int32 array signature."));
 	return false;
 }
 
-DEFINE_FUNCTION(UConfigSaveLibrary::execWriteConfigArray)
+DEFINE_FUNCTION(UConfigurationLibrary::execWriteConfigArray)
 {
 	P_GET_PROPERTY(FStrProperty, Section);
 	P_GET_PROPERTY(FStrProperty, Key);
@@ -1039,13 +1039,13 @@ DEFINE_FUNCTION(UConfigSaveLibrary::execWriteConfigArray)
 	P_NATIVE_END;
 }
 
-bool UConfigSaveLibrary::ReadConfigArray(const FString& Section, const FString& Key, TArray<int32>& Values, const FString& Filename)
+bool UConfigurationLibrary::ReadConfigArray(const FString& Section, const FString& Key, TArray<int32>& Values, const FString& Filename)
 {
 	UE_LOG(LogWNTConfig, Error, TEXT("Read Config Array failed: This wildcard array node must be executed through the Blueprint VM custom thunk path. Native C++ calls cannot use the placeholder int32 array signature."));
 	return false;
 }
 
-DEFINE_FUNCTION(UConfigSaveLibrary::execReadConfigArray)
+DEFINE_FUNCTION(UConfigurationLibrary::execReadConfigArray)
 {
 	P_GET_PROPERTY(FStrProperty, Section);
 	P_GET_PROPERTY(FStrProperty, Key);
@@ -1070,13 +1070,13 @@ DEFINE_FUNCTION(UConfigSaveLibrary::execReadConfigArray)
 	P_NATIVE_END;
 }
 
-bool UConfigSaveLibrary::AddUniqueToConfigArray(const FString& Section, const FString& Key, const int32& Value, const FString& Filename)
+bool UConfigurationLibrary::AddUniqueToConfigArray(const FString& Section, const FString& Key, const int32& Value, const FString& Filename)
 {
 	UE_LOG(LogWNTConfig, Error, TEXT("Add Unique To Config Array failed: This wildcard node must be executed through the Blueprint VM custom thunk path. Native C++ calls cannot use the placeholder int32 signature."));
 	return false;
 }
 
-DEFINE_FUNCTION(UConfigSaveLibrary::execAddUniqueToConfigArray)
+DEFINE_FUNCTION(UConfigurationLibrary::execAddUniqueToConfigArray)
 {
 	P_GET_PROPERTY(FStrProperty, Section);
 	P_GET_PROPERTY(FStrProperty, Key);
@@ -1095,13 +1095,13 @@ DEFINE_FUNCTION(UConfigSaveLibrary::execAddUniqueToConfigArray)
 	P_NATIVE_END;
 }
 
-bool UConfigSaveLibrary::RemoveFromConfigArray(const FString& Section, const FString& Key, const int32& Value, const FString& Filename)
+bool UConfigurationLibrary::RemoveFromConfigArray(const FString& Section, const FString& Key, const int32& Value, const FString& Filename)
 {
 	UE_LOG(LogWNTConfig, Error, TEXT("Remove From Config Array failed: This wildcard node must be executed through the Blueprint VM custom thunk path. Native C++ calls cannot use the placeholder int32 signature."));
 	return false;
 }
 
-DEFINE_FUNCTION(UConfigSaveLibrary::execRemoveFromConfigArray)
+DEFINE_FUNCTION(UConfigurationLibrary::execRemoveFromConfigArray)
 {
 	P_GET_PROPERTY(FStrProperty, Section);
 	P_GET_PROPERTY(FStrProperty, Key);
@@ -1120,7 +1120,7 @@ DEFINE_FUNCTION(UConfigSaveLibrary::execRemoveFromConfigArray)
 	P_NATIVE_END;
 }
 
-bool UConfigSaveLibrary::WriteEncryptedString(const FString& Section, const FString& Key, const FString& Value, const FString& Filename)
+bool UConfigurationLibrary::WriteEncryptedString(const FString& Section, const FString& Key, const FString& Value, const FString& Filename)
 {
 	static const TCHAR* Operation = TEXT("Write Encrypted String");
 
@@ -1147,7 +1147,7 @@ bool UConfigSaveLibrary::WriteEncryptedString(const FString& Section, const FStr
 	return FinalizeConfigWrite(Operation, ResolvedFilename);
 }
 
-bool UConfigSaveLibrary::ReadEncryptedString(const FString& Section, const FString& Key, FString& Value, const FString& Filename)
+bool UConfigurationLibrary::ReadEncryptedString(const FString& Section, const FString& Key, FString& Value, const FString& Filename)
 {
 	static const TCHAR* Operation = TEXT("Read Encrypted String");
 
@@ -1174,7 +1174,7 @@ bool UConfigSaveLibrary::ReadEncryptedString(const FString& Section, const FStri
 	return true;
 }
 
-FString UConfigSaveLibrary::ConvertAssetToPath(UObject* Asset)
+FString UConfigurationLibrary::ConvertAssetToPath(UObject* Asset)
 {
 	if (!Asset)
 	{
@@ -1184,7 +1184,7 @@ FString UConfigSaveLibrary::ConvertAssetToPath(UObject* Asset)
 	return Asset ? FSoftObjectPath(Asset).ToString() : FString();
 }
 
-FString UConfigSaveLibrary::ConvertClassToPath(UClass* Class)
+FString UConfigurationLibrary::ConvertClassToPath(UClass* Class)
 {
 	if (!Class)
 	{
@@ -1194,7 +1194,7 @@ FString UConfigSaveLibrary::ConvertClassToPath(UClass* Class)
 	return Class ? FSoftClassPath(Class).ToString() : FString();
 }
 
-bool UConfigSaveLibrary::ConvertPathToSoftAssetReference(const FString& Path, TSoftObjectPtr<UObject>& Asset)
+bool UConfigurationLibrary::ConvertPathToSoftAssetReference(const FString& Path, TSoftObjectPtr<UObject>& Asset)
 {
 	Asset = TSoftObjectPtr<UObject>();
 
@@ -1216,7 +1216,7 @@ bool UConfigSaveLibrary::ConvertPathToSoftAssetReference(const FString& Path, TS
 	return true;
 }
 
-bool UConfigSaveLibrary::ConvertPathToSoftClassReference(const FString& Path, TSoftClassPtr<UObject>& Class)
+bool UConfigurationLibrary::ConvertPathToSoftClassReference(const FString& Path, TSoftClassPtr<UObject>& Class)
 {
 	Class = TSoftClassPtr<UObject>();
 
@@ -1238,7 +1238,7 @@ bool UConfigSaveLibrary::ConvertPathToSoftClassReference(const FString& Path, TS
 	return true;
 }
 
-bool UConfigSaveLibrary::ClearConfigKey(const FString& Section, const FString& Key, const FString& Filename)
+bool UConfigurationLibrary::ClearConfigKey(const FString& Section, const FString& Key, const FString& Filename)
 {
 	static const TCHAR* Operation = TEXT("Clear Config Key");
 
@@ -1262,7 +1262,7 @@ bool UConfigSaveLibrary::ClearConfigKey(const FString& Section, const FString& K
 	return FinalizeConfigWrite(Operation, ResolvedFilename, true);
 }
 
-bool UConfigSaveLibrary::ClearConfigSection(const FString& Section, const FString& Filename)
+bool UConfigurationLibrary::ClearConfigSection(const FString& Section, const FString& Filename)
 {
 	static const TCHAR* Operation = TEXT("Clear Config Section");
 
@@ -1275,7 +1275,7 @@ bool UConfigSaveLibrary::ClearConfigSection(const FString& Section, const FStrin
 	return RemoveConfigSectionFromFile(Operation, Section, ResolvedFilename);
 }
 
-bool UConfigSaveLibrary::RemoveConfigSection(const FString& Section, const FString& Filename)
+bool UConfigurationLibrary::RemoveConfigSection(const FString& Section, const FString& Filename)
 {
 	static const TCHAR* Operation = TEXT("Remove Config Section");
 
@@ -1288,7 +1288,7 @@ bool UConfigSaveLibrary::RemoveConfigSection(const FString& Section, const FStri
 	return RemoveConfigSectionFromFile(Operation, Section, ResolvedFilename);
 }
 
-bool UConfigSaveLibrary::DeleteConfigFile(const FString& Filename)
+bool UConfigurationLibrary::DeleteConfigFile(const FString& Filename)
 {
 	static const TCHAR* Operation = TEXT("Delete Config File");
 
@@ -1335,7 +1335,7 @@ bool UConfigSaveLibrary::DeleteConfigFile(const FString& Filename)
 	return true;
 }
 
-bool UConfigSaveLibrary::DoesConfigKeyExist(const FString& Section, const FString& Key, const FString& Filename)
+bool UConfigurationLibrary::DoesConfigKeyExist(const FString& Section, const FString& Key, const FString& Filename)
 {
 	static const TCHAR* Operation = TEXT("Does Config Key Exist");
 
@@ -1361,7 +1361,7 @@ bool UConfigSaveLibrary::DoesConfigKeyExist(const FString& Section, const FStrin
 	return bExists;
 }
 
-bool UConfigSaveLibrary::DoesConfigFileExist(const FString& Filename)
+bool UConfigurationLibrary::DoesConfigFileExist(const FString& Filename)
 {
 	const FString ResolvedFilename = ResolveConfigFilename(Filename);
 	const FString DiskFilename = GetDiskConfigFilename(ResolvedFilename);
@@ -1380,7 +1380,7 @@ bool UConfigSaveLibrary::DoesConfigFileExist(const FString& Filename)
 	return bExists;
 }
 
-TArray<FString> UConfigSaveLibrary::GetConfigSections(const FString& Filename)
+TArray<FString> UConfigurationLibrary::GetConfigSections(const FString& Filename)
 {
 	static const TCHAR* Operation = TEXT("Get Config Sections");
 
@@ -1408,7 +1408,7 @@ TArray<FString> UConfigSaveLibrary::GetConfigSections(const FString& Filename)
 	return Sections;
 }
 
-bool UConfigSaveLibrary::FlushConfig(const FString& Filename)
+bool UConfigurationLibrary::FlushConfig(const FString& Filename)
 {
 	static const TCHAR* Operation = TEXT("Flush Config");
 

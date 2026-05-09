@@ -7,9 +7,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/ThreadSafeBool.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
-#include "FileSystemBlueprintLibrary.generated.h"
+#include "FileSystemLibrary.generated.h"
 
 /** Windows drive and partition types reported by the platform file system. */
 UENUM(BlueprintType)
@@ -146,6 +147,7 @@ struct FWNTFolderInfo
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FWNTFileOperationCompleted);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFolderSizeCalculated, int64, FolderSizeBytes);
 
 /** Async file-system operation node with direct success and fail execution pins. */
 UCLASS()
@@ -233,9 +235,44 @@ private:
     bool bAddedToRootForCompatibility = false;
 };
 
+/** Async Blueprint action that scans a folder size on a background thread. */
+UCLASS()
+class FILEIOUTILITYMODULE_API UAsyncGetFolderSize : public UBlueprintAsyncActionBase
+{
+    GENERATED_BODY()
+
+public:
+    /** Called periodically while folder contents are scanned. */
+    UPROPERTY(BlueprintAssignable)
+    FOnFolderSizeCalculated OnProgress;
+
+    /** Called when folder size calculation completes. */
+    UPROPERTY(BlueprintAssignable)
+    FOnFolderSizeCalculated OnSuccess;
+
+    /** Called when calculation fails. FolderSizeBytes is 0 for compatibility. */
+    UPROPERTY(BlueprintAssignable)
+    FOnFolderSizeCalculated OnFail;
+
+    /** Calculates a folder size on a background thread and keeps the async action alive through the GameInstance. */
+    UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Get Folder Size"), Category = "Windows Native Toolkit|Files Management")
+    static UAsyncGetFolderSize* GetFolderSize(const UObject* WorldContextObject, const FString& FolderPath);
+
+    /** Requests cancellation. Completion delegates are always broadcast on the game thread. */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (DisplayName = "Cancel Folder Size Task"))
+    void Cancel();
+
+    virtual void Activate() override;
+
+private:
+    FString TargetFolderPath;
+    TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> bCancelRequested;
+    bool bAddedToRootForCompatibility = false;
+};
+
 /** Native Windows file-system helper nodes for Blueprints. */
 UCLASS()
-class FILEIOUTILITYMODULE_API UFileSystemBlueprintLibrary : public UBlueprintFunctionLibrary
+class FILEIOUTILITYMODULE_API UFileSystemLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
