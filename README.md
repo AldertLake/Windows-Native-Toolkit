@@ -2,6 +2,9 @@
 
 # Windows Native Toolkit (WNT)
 
+[![Stars](https://img.shields.io/github/stars/AldertLake/Windows-Native-Toolkit?style=for-the-badge&logo=github)](https://github.com/AldertLake/Windows-Native-Toolkit/stargazers)
+[![Last Updated](https://img.shields.io/github/last-commit/AldertLake/Windows-Native-Toolkit?style=for-the-badge&label=last%20updated)](https://github.com/AldertLake/Windows-Native-Toolkit/commits)
+
 **Windows Native Toolkit** is a high-performance Unreal Engine plugin that bridges the gap between your project and the underlying operating system. It provides comprehensive Blueprint and C++ access to native system features, hardware diagnostics, and advanced OS workflows that are typically inaccessible within the standard engine API.
 
 
