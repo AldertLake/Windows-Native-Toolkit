@@ -1,10 +1,11 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
 // -----------------------------------------------------
 
 #include "OpenApps.h"
+#include "SystemUtilityModule.h"
 #include "Misc/Paths.h"
 
 #if PLATFORM_WINDOWS
@@ -13,44 +14,54 @@
 #include <shellapi.h>
 #include <tlhelp32.h>
 #include "Windows/HideWindowsPlatformTypes.h"
+
+/** RAII wrapper for Windows HANDLE objects. Automatically calls CloseHandle on destruction. */
 struct FHandlePtr
 {
     HANDLE Handle = nullptr;
     FHandlePtr() = default;
     explicit FHandlePtr(HANDLE InHandle) : Handle(InHandle) {}
     ~FHandlePtr() { if (Handle && Handle != INVALID_HANDLE_VALUE) CloseHandle(Handle); }
+    FHandlePtr(const FHandlePtr&) = delete;
+    FHandlePtr& operator=(const FHandlePtr&) = delete;
     HANDLE* operator&() { return &Handle; }
     bool IsValid() const { return Handle != nullptr && Handle != INVALID_HANDLE_VALUE; }
+    void Reset(HANDLE InHandle = nullptr)
+    {
+        if (Handle && Handle != INVALID_HANDLE_VALUE) CloseHandle(Handle);
+        Handle = InHandle;
+    }
 };
+
+/** Maximum number of polling iterations when waiting for a child process to appear after launch. */
+static constexpr int32 MaxChildScanRetries = 10;
+
+/** Delay in seconds between each child-process polling attempt. */
+static constexpr float ChildScanIntervalSeconds = 0.05f;
 #endif
 
 static int32 FindChildProcess(int32 ParentPID)
 {
 #if PLATFORM_WINDOWS
     int32 FoundPID = 0;
-    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    FHandlePtr Snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
 
-    if (hSnapshot != INVALID_HANDLE_VALUE)
+    if (Snapshot.IsValid())
     {
         PROCESSENTRY32W ProcessEntry;
         ProcessEntry.dwSize = sizeof(PROCESSENTRY32W);
 
-        if (Process32FirstW(hSnapshot, &ProcessEntry))
+        if (Process32FirstW(Snapshot.Handle, &ProcessEntry))
         {
             do
             {
-
                 if (ProcessEntry.th32ParentProcessID == static_cast<DWORD>(ParentPID))
                 {
                     FoundPID = static_cast<int32>(ProcessEntry.th32ProcessID);
-
-
-
                     break;
                 }
-            } while (Process32NextW(hSnapshot, &ProcessEntry));
+            } while (Process32NextW(Snapshot.Handle, &ProcessEntry));
         }
-        CloseHandle(hSnapshot);
     }
     return FoundPID;
 #else
@@ -58,47 +69,41 @@ static int32 FindChildProcess(int32 ParentPID)
 #endif
 }
 
-
 static void BuildProcessTreeAndKill(int32 RootPID)
 {
 #if PLATFORM_WINDOWS
-    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnapshot == INVALID_HANDLE_VALUE) return;
+    FHandlePtr Snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+    if (!Snapshot.IsValid()) return;
 
     TMultiMap<int32, int32> ParentToChildren;
 
     PROCESSENTRY32W ProcessEntry;
     ProcessEntry.dwSize = sizeof(PROCESSENTRY32W);
 
-    if (Process32FirstW(hSnapshot, &ProcessEntry))
+    if (Process32FirstW(Snapshot.Handle, &ProcessEntry))
     {
         do
         {
             ParentToChildren.Add(static_cast<int32>(ProcessEntry.th32ParentProcessID), static_cast<int32>(ProcessEntry.th32ProcessID));
-        } while (Process32NextW(hSnapshot, &ProcessEntry));
+        } while (Process32NextW(Snapshot.Handle, &ProcessEntry));
     }
-    CloseHandle(hSnapshot);
-
 
     TArray<int32> ToKill;
     ToKill.Add(RootPID);
 
     for (int32 i = 0; i < ToKill.Num(); ++i)
     {
-        int32 CurrentPID = ToKill[i];
         TArray<int32> Children;
-        ParentToChildren.MultiFind(CurrentPID, Children);
+        ParentToChildren.MultiFind(ToKill[i], Children);
         ToKill.Append(Children);
     }
 
-
     for (int32 i = ToKill.Num() - 1; i >= 0; --i)
     {
-        HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, false, static_cast<DWORD>(ToKill[i]));
-        if (hProcess)
+        FHandlePtr Process(OpenProcess(PROCESS_TERMINATE, false, static_cast<DWORD>(ToKill[i])));
+        if (Process.IsValid())
         {
-            TerminateProcess(hProcess, 0);
-            CloseHandle(hProcess);
+            TerminateProcess(Process.Handle, 0);
         }
     }
 #endif
@@ -130,6 +135,10 @@ int32 UOpenApps::LaunchExternalProcess(const FString& ExePath, const FString& Ar
         CloseHandle(pi.hThread);
         BestPID = static_cast<int32>(pi.dwProcessId);
     }
+    else
+    {
+        UE_LOG(LogWNT, Error, TEXT("LaunchExternalProcess: CreateProcessW failed for '%s'. Error: %lu"), *CleanPath, GetLastError());
+    }
 #else
     uint32 InitialPID = 0;
     FProcHandle Handle = FPlatformProcess::CreateProc(
@@ -144,25 +153,14 @@ int32 UOpenApps::LaunchExternalProcess(const FString& ExePath, const FString& Ar
 
     if (BestPID > 0)
     {
-        for (int i = 0; i < 10; i++)
+        for (int32 i = 0; i < MaxChildScanRetries; ++i)
         {
-            FPlatformProcess::Sleep(0.05f);
+            FPlatformProcess::Sleep(ChildScanIntervalSeconds);
 
-
-            int32 ChildPID = FindChildProcess(BestPID);
-
+            const int32 ChildPID = FindChildProcess(BestPID);
             if (ChildPID > 0)
             {
                 BestPID = ChildPID;
-            }
-
-
-            if (!IsProcessRunning(BestPID))
-            {
-                if (ChildPID > 0)
-                {
-                    BestPID = ChildPID;
-                }
             }
         }
     }
@@ -175,20 +173,20 @@ bool UOpenApps::IsProcessRunning(int32 ProcessID)
     if (ProcessID <= 0) return false;
 
 #if PLATFORM_WINDOWS
+    FHandlePtr Process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, static_cast<DWORD>(ProcessID)));
 
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, static_cast<DWORD>(ProcessID));
+    if (!Process.IsValid())
+    {
+        Process.Reset(OpenProcess(SYNCHRONIZE, false, static_cast<DWORD>(ProcessID)));
+    }
 
-    if (hProcess == NULL) hProcess = OpenProcess(SYNCHRONIZE, false, static_cast<DWORD>(ProcessID));
-
-    if (hProcess != NULL)
+    if (Process.IsValid())
     {
         DWORD ExitCode = 0;
-        if (GetExitCodeProcess(hProcess, &ExitCode))
+        if (GetExitCodeProcess(Process.Handle, &ExitCode))
         {
-            CloseHandle(hProcess);
             return (ExitCode == STILL_ACTIVE);
         }
-        CloseHandle(hProcess);
     }
 #endif
     return false;
@@ -199,10 +197,7 @@ bool UOpenApps::KillProcessTree(int32 ProcessID)
     if (ProcessID <= 0) return false;
 
 #if PLATFORM_WINDOWS
-
     BuildProcessTreeAndKill(ProcessID);
-
-
     return !IsProcessRunning(ProcessID);
 #else
     return false;
@@ -257,5 +252,3 @@ bool UOpenApps::BringAppToFront(int32 ProcessID)
 #endif
     return false;
 }
-
-

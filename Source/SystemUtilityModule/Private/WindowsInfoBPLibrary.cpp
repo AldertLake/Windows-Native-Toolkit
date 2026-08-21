@@ -1,10 +1,11 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
 // -----------------------------------------------------
 
 #include "WindowsInfoBPLibrary.h"
+#include "SystemUtilityModule.h"
 #include "HAL/PlatformProcess.h"
 
 #if PLATFORM_WINDOWS
@@ -192,8 +193,9 @@ uint32 UWindowsInfoBPLibrary::ReadRegistryDWORD(const FString& KeyPath, const FS
 
     if (RegOpenKeyEx(RootKey, *KeyPath, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
+        DWORD Type = 0;
         DWORD Size = sizeof(DWORD);
-        if (RegQueryValueEx(hKey.Key, *ValueName, nullptr, nullptr, reinterpret_cast<LPBYTE>(&Value), &Size) != ERROR_SUCCESS)
+        if (RegQueryValueEx(hKey.Key, *ValueName, nullptr, &Type, reinterpret_cast<LPBYTE>(&Value), &Size) != ERROR_SUCCESS || Type != REG_DWORD)
         {
             Value = 0;
         }

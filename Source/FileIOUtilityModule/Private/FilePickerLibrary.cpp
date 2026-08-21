@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -91,36 +91,41 @@ void BuildFilterSpecs(const FString& FileTypes, TArray<FString>& OutNames, TArra
 }
 #endif
 
-bool UFilePickerLibrary::OpenPathPicker(const FString& DialogTitle, const FString& DefaultPath, const FString& FileTypes, bool bAllowMultiple, EFilePickerType PickerType, TArray<FString>& OutPaths)
-{
-    return OpenFileFolderPicker(DialogTitle, DefaultPath, FileTypes, bAllowMultiple, PickerType, OutPaths);
-}
 
 FString UFilePickerLibrary::MakeFileFilter(const TArray<FFileDialogFilter>& Filters)
 {
-    TArray<FString> Parts;
+    FString Result;
+    Result.Reserve(Filters.Num() * 32);
+
     for (const FFileDialogFilter& Filter : Filters)
     {
         const FString Name = Filter.Name.TrimStartAndEnd();
         const FString Pattern = Filter.Pattern.TrimStartAndEnd();
+        
         if (!Name.IsEmpty() && !Pattern.IsEmpty())
         {
-            Parts.Add(Name);
-            Parts.Add(Pattern);
+            if (!Result.IsEmpty())
+            {
+                Result.AppendChar('|');
+            }
+            Result.Append(Name);
+            Result.AppendChar('|');
+            Result.Append(Pattern);
         }
     }
-    return FString::Join(Parts, TEXT("|"));
+    
+    return Result;
 }
 
-bool UFilePickerLibrary::OpenFileFolderPicker(
+bool UFilePickerLibrary::OpenPathPicker(
     const FString& DialogTitle,
     const FString& DefaultPath,
     const FString& FileTypes,
     bool bAllowMultiple,
     EFilePickerType PickerType,
-    TArray<FString>& OutFilenames)
+    TArray<FString>& OutPaths)
 {
-    OutFilenames.Empty();
+    OutPaths.Empty();
 
 #if PLATFORM_WINDOWS
     FScopedComInit ComInit;
@@ -168,7 +173,7 @@ bool UFilePickerLibrary::OpenFileFolderPicker(
         }
     }
 
-    if (PickerType == EFilePickerType::File)
+    if (PickerType == EFilePickerType::File && !FileTypes.IsEmpty())
     {
         TArray<COMDLG_FILTERSPEC> FileTypesCOM;
         TArray<FString> TempNames;
@@ -192,6 +197,8 @@ bool UFilePickerLibrary::OpenFileFolderPicker(
         {
             DWORD Count = 0;
             Results->GetCount(&Count);
+            
+            OutPaths.Reserve(Count);
 
             for (DWORD i = 0; i < Count; i++)
             {
@@ -201,12 +208,14 @@ bool UFilePickerLibrary::OpenFileFolderPicker(
                     PWSTR FilePath = nullptr;
                     if (SUCCEEDED(Item->GetDisplayName(SIGDN_FILESYSPATH, &FilePath)))
                     {
-                        OutFilenames.Add(FString(FilePath));
+                        FString NormalizedPath(FilePath);
+                        FPaths::NormalizeFilename(NormalizedPath);
+                        OutPaths.Add(NormalizedPath);
                         CoTaskMemFree(FilePath);
                     }
                 }
             }
-            bSuccess = (OutFilenames.Num() > 0);
+            bSuccess = (OutPaths.Num() > 0);
         }
     }
 
@@ -292,6 +301,7 @@ bool UFilePickerLibrary::ShowSaveFilePicker(
             if (SUCCEEDED(ResultItem->GetDisplayName(SIGDN_FILESYSPATH, &FilePath)))
             {
                 OutFilename = FString(FilePath);
+                FPaths::NormalizeFilename(OutFilename);
                 CoTaskMemFree(FilePath);
                 return true;
             }
@@ -303,5 +313,3 @@ bool UFilePickerLibrary::ShowSaveFilePicker(
     return false;
 #endif
 }
-
-

@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -129,12 +129,6 @@ static bool ValidateManagedDirectoryPath(const FString& RawPath, FString& OutPat
 {
     if (!ValidatePathString(RawPath, OutPath, OutError))
     {
-        return false;
-    }
-
-    if (IsDriveRootPath(OutPath))
-    {
-        OutError = TEXT("Refusing to use a drive root for this operation.");
         return false;
     }
 
@@ -551,83 +545,83 @@ UAsyncFileSystemOperation* UAsyncFileSystemOperation::CreateOperation(const UObj
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::MoveFileToFolder(const UObject* WorldContextObject, const FString& Source, const FString& Destination, bool bOverwrite)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::MoveFileToFolder(const UObject* WorldContextObject, const FString& File, const FString& DestinationFolder, bool bOverwrite)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::MoveFile);
-    Node->SourcePath = Source;
-    Node->DestinationPath = Destination;
+    Node->SourcePath = File;
+    Node->DestinationPath = DestinationFolder;
     Node->bOverwriteExisting = bOverwrite;
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::MoveFolderToFolder(const UObject* WorldContextObject, const FString& Source, const FString& Destination, bool bOverwrite)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::MoveFolderToFolder(const UObject* WorldContextObject, const FString& Folder, const FString& DestinationFolder, bool bOverwrite)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::MoveFolder);
-    Node->SourcePath = Source;
-    Node->DestinationPath = Destination;
+    Node->SourcePath = Folder;
+    Node->DestinationPath = DestinationFolder;
     Node->bOverwriteExisting = bOverwrite;
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::CopyFileToFolder(const UObject* WorldContextObject, const FString& Source, const FString& Destination, bool bOverwrite)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::CopyFileToFolder(const UObject* WorldContextObject, const FString& File, const FString& DestinationFolder, bool bOverwrite)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::CopyFile);
-    Node->SourcePath = Source;
-    Node->DestinationPath = Destination;
+    Node->SourcePath = File;
+    Node->DestinationPath = DestinationFolder;
     Node->bOverwriteExisting = bOverwrite;
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::CopyFolderToFolder(const UObject* WorldContextObject, const FString& Source, const FString& Destination, bool bOverwrite)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::CopyFolderToFolder(const UObject* WorldContextObject, const FString& Folder, const FString& DestinationFolder, bool bOverwrite)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::CopyFolder);
-    Node->SourcePath = Source;
-    Node->DestinationPath = Destination;
+    Node->SourcePath = Folder;
+    Node->DestinationPath = DestinationFolder;
     Node->bOverwriteExisting = bOverwrite;
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::DeleteFileW(const UObject* WorldContextObject, const FString& Path)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::DeleteFileW(const UObject* WorldContextObject, const FString& File)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::DeleteFile);
-    Node->TargetPath = Path;
+    Node->TargetPath = File;
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::DeleteFolder(const UObject* WorldContextObject, const FString& Path)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::DeleteFolder(const UObject* WorldContextObject, const FString& Folder)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::DeleteFolder);
-    Node->TargetPath = Path;
+    Node->TargetPath = Folder;
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::RecycleFile(const UObject* WorldContextObject, const FString& FilePath)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::RecycleFile(const UObject* WorldContextObject, const FString& File)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::RecycleFile);
-    Node->TargetPath = FilePath;
+    Node->TargetPath = File;
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::RecycleFolder(const UObject* WorldContextObject, const FString& FolderPath)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::RecycleFolder(const UObject* WorldContextObject, const FString& Folder)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::RecycleFolder);
-    Node->TargetPath = FolderPath;
+    Node->TargetPath = Folder;
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::RenameFile(const UObject* WorldContextObject, const FString& FilePath, const FString& NewFileName, bool bOverwrite)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::RenameFile(const UObject* WorldContextObject, const FString& File, const FString& NewFileName, bool bOverwrite)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::RenameFile);
-    Node->TargetPath = FilePath;
+    Node->TargetPath = File;
     Node->TargetName = NewFileName;
     Node->bOverwriteExisting = bOverwrite;
     return Node;
 }
 
-UAsyncFileSystemOperation* UAsyncFileSystemOperation::RenameFolder(const UObject* WorldContextObject, const FString& FolderPath, const FString& NewFolderName, bool bOverwrite)
+UAsyncFileSystemOperation* UAsyncFileSystemOperation::RenameFolder(const UObject* WorldContextObject, const FString& Folder, const FString& NewFolderName, bool bOverwrite)
 {
     UAsyncFileSystemOperation* Node = CreateOperation(WorldContextObject, EFileOperationKind::RenameFolder);
-    Node->TargetPath = FolderPath;
+    Node->TargetPath = Folder;
     Node->TargetName = NewFolderName;
     Node->bOverwriteExisting = bOverwrite;
     return Node;
@@ -643,7 +637,7 @@ void UAsyncFileSystemOperation::Activate()
     const FString NameCopy = TargetName;
     const bool bOverwriteCopy = bOverwriteExisting;
 
-    Async(EAsyncExecution::Thread, [WeakThis, OperationKindCopy, SourceCopy, DestinationCopy, PathCopy, NameCopy, bOverwriteCopy]()
+    AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakThis, OperationKindCopy, SourceCopy, DestinationCopy, PathCopy, NameCopy, bOverwriteCopy]()
     {
         bool bSuccess = false;
         FString ErrorMessage;
@@ -720,10 +714,10 @@ void UAsyncFileSystemOperation::Finalize(bool bSuccess)
     SetReadyToDestroy();
 }
 
-FWNTFileInfo UFileSystemLibrary::GetFileInfo(const FString& FilePath)
+FWNTFileInfo UFileSystemLibrary::GetFileInfo(const FString& File)
 {
     IPlatformFile& PlatformFile = GetPlatformFile();
-    FString Target = NormalizeFileSystemPath(FilePath);
+    FString Target = NormalizeFileSystemPath(File);
     FWNTFileInfo Info;
     Info.AbsolutePath = Target;
     Info.FileName = FPaths::GetCleanFilename(Target);
@@ -744,10 +738,10 @@ FWNTFileInfo UFileSystemLibrary::GetFileInfo(const FString& FilePath)
     return Info;
 }
 
-FWNTFolderInfo UFileSystemLibrary::GetFolderInfo(const FString& FolderPath)
+FWNTFolderInfo UFileSystemLibrary::GetFolderInfo(const FString& Folder)
 {
     IPlatformFile& PlatformFile = GetPlatformFile();
-    FString Target = NormalizeFileSystemPath(FolderPath);
+    FString Target = NormalizeFileSystemPath(Folder);
     FWNTFolderInfo Info;
     Info.AbsolutePath = Target;
     Info.FolderName = FPaths::GetCleanFilename(Target);
@@ -1075,14 +1069,18 @@ void UFileSystemLibrary::ShowFileInExplorer(const FString& FilePath)
     CleanPath.ReplaceInline(TEXT("/"), TEXT("\\"));
 
     FString Args = FString::Printf(TEXT("/select,\"%s\""), *CleanPath);
-    FPlatformProcess::CreateProc(TEXT("explorer.exe"), *Args, true, false, false, nullptr, 0, nullptr, nullptr);
+    FProcHandle ProcessHandle = FPlatformProcess::CreateProc(TEXT("explorer.exe"), *Args, true, false, false, nullptr, 0, nullptr, nullptr);
+    if (ProcessHandle.IsValid())
+    {
+        FPlatformProcess::CloseProc(ProcessHandle);
+    }
 #endif
 }
 
-UAsyncGetFolderSize* UAsyncGetFolderSize::GetFolderSize(const UObject* WorldContextObject, const FString& FolderPath)
+UAsyncGetFolderSize* UAsyncGetFolderSize::GetFolderSize(const UObject* WorldContextObject, const FString& Folder)
 {
     UAsyncGetFolderSize* Node = NewObject<UAsyncGetFolderSize>();
-    Node->TargetFolderPath = FolderPath;
+    Node->TargetFolderPath = Folder;
     Node->bCancelRequested = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
     if (WorldContextObject)
     {
@@ -1144,26 +1142,25 @@ void UAsyncGetFolderSize::Activate()
 
     AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakThis, PathCopy, CancelFlag]()
     {
-        struct FFolderSizeVisitor : public IPlatformFile::FDirectoryVisitor
+        struct FFolderSizeVisitor : public IPlatformFile::FDirectoryStatVisitor
         {
             int64 TotalSize = 0;
             int32 VisitedFileCount = 0;
             TWeakObjectPtr<UAsyncGetFolderSize> WeakNode;
             TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancelFlag;
 
-            virtual bool Visit(const TCHAR* FilenameOrDirectory, bool bIsDirectory) override
+            virtual bool Visit(const TCHAR* FilenameOrDirectory, const FFileStatData& StatData) override
             {
                 if (CancelFlag.IsValid() && *CancelFlag)
                 {
                     return false;
                 }
 
-                if (!bIsDirectory)
+                if (!StatData.bIsDirectory)
                 {
-                    const int64 FileSize = FPlatformFileManager::Get().GetPlatformFile().FileSize(FilenameOrDirectory);
-                    if (FileSize >= 0)
+                    if (StatData.FileSize > 0)
                     {
-                        TotalSize += FileSize;
+                        TotalSize += StatData.FileSize;
                     }
 
                     ++VisitedFileCount;
@@ -1188,7 +1185,7 @@ void UAsyncGetFolderSize::Activate()
         Visitor.WeakNode = WeakThis;
         Visitor.CancelFlag = CancelFlag;
 
-        const bool bCompleted = FPlatformFileManager::Get().GetPlatformFile().IterateDirectoryRecursively(*PathCopy, Visitor);
+        const bool bCompleted = FPlatformFileManager::Get().GetPlatformFile().IterateDirectoryStatRecursively(*PathCopy, Visitor);
         const bool bCanceled = CancelFlag.IsValid() && *CancelFlag;
         const int64 FinalSize = Visitor.TotalSize;
 

@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -178,9 +178,9 @@ public:
 	static bool RemoveConfigSection(const FString& Section, UPARAM(DisplayName="File Name") const FString& FileName = FString(TEXT("")));
 
 	/**
-	 * Deletes a generated project config file from disk and unloads it from GConfig when possible.
-	 * @param FileName Optional config file name. Leave empty to use the Default Config File Name from Project Settings.
-	 * @return True if the generated config file existed under the project's generated config directory and was deleted.
+	 * Deletes a generated project config file from disk, or deletes a non-generated config file when File Name is an absolute local .ini path.
+	 * @param FileName Optional config file name. Leave empty to use the Default Config File Name from Project Settings, or pass an absolute local .ini path for non-generated config deletion.
+	 * @return True if the resolved generated config file, or the supplied absolute local .ini file, existed and was deleted.
 	 */
 	UFUNCTION(BlueprintCallable, Category="Windows Native Toolkit|Config Files|Utilities", meta=(DisplayName="Delete Config File", ReturnDisplayName="Success"))
 	static bool DeleteConfigFile(UPARAM(DisplayName="File Name") const FString& FileName = FString(TEXT("")));
@@ -219,6 +219,3 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Windows Native Toolkit|Config Files|Utilities", meta=(DisplayName="Flush Config", ReturnDisplayName="Success"))
 	static bool FlushConfig(UPARAM(DisplayName="File Name") const FString& FileName = FString(TEXT("")));
 };
-
-
-

@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -114,6 +114,281 @@ namespace WNTConfig::Private
 		}
 
 		return FullFilename.StartsWith(FullDirectory, ESearchCase::IgnoreCase);
+	}
+
+	enum class EDeleteConfigFileMode : uint8
+	{
+		Generated,
+		ExternalAbsolute,
+		Invalid
+	};
+
+	struct FDeleteConfigInvalidationPlan
+	{
+		TArray<FConfigBranch*> BranchesToSafeUnload;
+		TArray<FString> ConfigKeysToUnload;
+
+		void AddBranchToSafeUnload(FConfigBranch* Branch)
+		{
+			if (Branch)
+			{
+				BranchesToSafeUnload.AddUnique(Branch);
+			}
+		}
+
+		void AddConfigKeyToUnload(const FString& ConfigKey)
+		{
+			if (!ConfigKey.IsEmpty())
+			{
+				ConfigKeysToUnload.AddUnique(ConfigKey);
+			}
+		}
+	};
+
+	bool IsPotentialUncPath(const FString& Filename)
+	{
+		FString Candidate = Filename.TrimStartAndEnd();
+		Candidate.ReplaceInline(TEXT("\\"), TEXT("/"));
+		if (Candidate.StartsWith(TEXT("//?/UNC/"), ESearchCase::IgnoreCase)
+			|| Candidate.StartsWith(TEXT("//./UNC/"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+
+		if (Candidate.StartsWith(TEXT("//?/"), ESearchCase::IgnoreCase)
+			|| Candidate.StartsWith(TEXT("//./"), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+
+		return Candidate.StartsWith(TEXT("//"), ESearchCase::IgnoreCase);
+	}
+
+	FString StripWindowsExtendedPathPrefix(const FString& Filename)
+	{
+		FString Candidate = Filename.TrimStartAndEnd();
+		Candidate.ReplaceInline(TEXT("\\"), TEXT("/"));
+		if (Candidate.StartsWith(TEXT("//?/"), ESearchCase::IgnoreCase)
+			|| Candidate.StartsWith(TEXT("//./"), ESearchCase::IgnoreCase))
+		{
+			Candidate.RightChopInline(4, EAllowShrinking::No);
+		}
+
+		return Candidate;
+	}
+
+	bool TryNormalizeAbsoluteConfigPath(const FString& Filename, FString& OutNormalizedPath)
+	{
+		OutNormalizedPath.Reset();
+
+		const FString Candidate = StripWindowsExtendedPathPrefix(Filename);
+		if (Candidate.IsEmpty() || FPaths::IsRelative(Candidate) || IsPotentialUncPath(Candidate))
+		{
+			return false;
+		}
+
+		OutNormalizedPath = FPaths::ConvertRelativePathToFull(Candidate);
+		FPaths::NormalizeFilename(OutNormalizedPath);
+		FPaths::CollapseRelativeDirectories(OutNormalizedPath);
+		OutNormalizedPath = FConfigCacheIni::NormalizeConfigIniPath(OutNormalizedPath);
+		return !IsPotentialUncPath(OutNormalizedPath);
+	}
+
+	EDeleteConfigFileMode ClassifyDeleteConfigFilename(const FString& Filename, FString& OutNormalizedAbsoluteFilename, FString& OutFailureReason)
+	{
+		OutNormalizedAbsoluteFilename.Reset();
+		OutFailureReason.Reset();
+
+		const FString TrimmedFilename = Filename.TrimStartAndEnd();
+		if (TrimmedFilename.IsEmpty() || FPaths::IsRelative(TrimmedFilename))
+		{
+			return EDeleteConfigFileMode::Generated;
+		}
+
+		if (IsPotentialUncPath(TrimmedFilename))
+		{
+			OutFailureReason = TEXT("UNC and network config paths are not supported.");
+			return EDeleteConfigFileMode::Invalid;
+		}
+
+		if (!TryNormalizeAbsoluteConfigPath(TrimmedFilename, OutNormalizedAbsoluteFilename))
+		{
+			OutFailureReason = TEXT("Only absolute local .ini paths are supported for non-generated config deletion.");
+			return EDeleteConfigFileMode::Invalid;
+		}
+
+		if (!FPaths::GetExtension(OutNormalizedAbsoluteFilename, false).Equals(TEXT("ini"), ESearchCase::IgnoreCase))
+		{
+			OutFailureReason = TEXT("Non-generated config deletion only supports absolute .ini file paths.");
+			return EDeleteConfigFileMode::Invalid;
+		}
+
+		return EDeleteConfigFileMode::ExternalAbsolute;
+	}
+
+	bool DoesBranchReferenceConfigPath(FConfigBranch& Branch, const FString& NormalizedDiskFilename)
+	{
+		FString NormalizedCandidate;
+		if (TryNormalizeAbsoluteConfigPath(Branch.IniPath, NormalizedCandidate)
+			&& NormalizedCandidate.Equals(NormalizedDiskFilename, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+
+		for (const TPair<int32, FString>& HierarchyEntry : Branch.Hierarchy)
+		{
+			if (TryNormalizeAbsoluteConfigPath(HierarchyEntry.Value, NormalizedCandidate)
+				&& NormalizedCandidate.Equals(NormalizedDiskFilename, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+		}
+
+		bool bReferencesPath = false;
+		Branch.RunOnEachCommandStream([&NormalizedDiskFilename, &bReferencesPath](FConfigCommandStream&, const FString& Name)
+		{
+			if (bReferencesPath)
+			{
+				return;
+			}
+
+			FString NormalizedName;
+			bReferencesPath = TryNormalizeAbsoluteConfigPath(Name, NormalizedName)
+				&& NormalizedName.Equals(NormalizedDiskFilename, ESearchCase::IgnoreCase);
+		});
+
+		return bReferencesPath;
+	}
+
+	void CollectDeleteInvalidationPlan(const FString& NormalizedDiskFilename, FDeleteConfigInvalidationPlan& OutPlan)
+	{
+		if (!GConfig)
+		{
+			return;
+		}
+
+		for (const FString& ConfigKey : GConfig->GetFilenames())
+		{
+			FConfigBranch* Branch = GConfig->FindBranchWithNoReload(*ConfigKey, ConfigKey);
+			if (!Branch || !DoesBranchReferenceConfigPath(*Branch, NormalizedDiskFilename))
+			{
+				continue;
+			}
+
+			if (Branch->bIsHierarchical)
+			{
+				OutPlan.AddBranchToSafeUnload(Branch);
+			}
+			else
+			{
+				OutPlan.AddConfigKeyToUnload(ConfigKey);
+				OutPlan.AddConfigKeyToUnload(Branch->IniPath);
+			}
+		}
+
+		OutPlan.AddConfigKeyToUnload(NormalizedDiskFilename);
+	}
+
+	void ApplyDeleteInvalidationPlan(FDeleteConfigInvalidationPlan& Plan)
+	{
+		if (!GConfig)
+		{
+			return;
+		}
+
+		for (FConfigBranch* Branch : Plan.BranchesToSafeUnload)
+		{
+			if (Branch)
+			{
+				Branch->SafeUnload();
+			}
+		}
+
+		for (const FString& ConfigKey : Plan.ConfigKeysToUnload)
+		{
+			GConfig->UnloadFile(ConfigKey);
+			GConfig->Remove(ConfigKey);
+		}
+	}
+
+	bool DeleteGeneratedConfigFileInternal(const TCHAR* Operation, const FString& Filename)
+	{
+		const FString ResolvedFilename = ResolveConfigFilename(Filename);
+		const FString DiskFilename = GetDiskConfigFilename(ResolvedFilename);
+		if (!IsPathInsideDirectory(DiskFilename, FPaths::GeneratedConfigDir()))
+		{
+			UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Generated config deletion only targets files under the project's generated config directory. ConfigName='%s', File='%s', AllowedDirectory='%s'."),
+				Operation, *ResolvedFilename, *DiskFilename, *FPaths::GeneratedConfigDir());
+			return false;
+		}
+
+		if (!FPaths::GetExtension(DiskFilename, false).Equals(TEXT("ini"), ESearchCase::IgnoreCase))
+		{
+			UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Resolved file is not an .ini file. ConfigName='%s', File='%s'."),
+				Operation, *ResolvedFilename, *DiskFilename);
+			return false;
+		}
+
+		if (!IFileManager::Get().FileExists(*DiskFilename))
+		{
+			UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Config file does not exist. ConfigName='%s', File='%s'."),
+				Operation, *ResolvedFilename, *DiskFilename);
+			return false;
+		}
+
+		FDeleteConfigInvalidationPlan InvalidationPlan;
+		CollectDeleteInvalidationPlan(DiskFilename, InvalidationPlan);
+
+		const bool bDeleted = IFileManager::Get().Delete(*DiskFilename, true, true, false);
+		if (!bDeleted)
+		{
+			UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Unreal file manager could not delete the file. ConfigName='%s', File='%s'."),
+				Operation, *ResolvedFilename, *DiskFilename);
+			return false;
+		}
+
+		ApplyDeleteInvalidationPlan(InvalidationPlan);
+		UE_LOG(LogWNTConfig, Log, TEXT("%s completed. ConfigName='%s', File='%s'."), Operation, *ResolvedFilename, *DiskFilename);
+		return true;
+	}
+
+	bool DeleteExternalAbsoluteConfigFileInternal(const TCHAR* Operation, const FString& RawFilename, const FString& NormalizedAbsoluteFilename)
+	{
+		if (IsPathInsideDirectory(NormalizedAbsoluteFilename, FPaths::EngineDir()))
+		{
+			UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Deleting Engine config files is not allowed. Input='%s', File='%s', EngineDirectory='%s'."),
+				Operation, *RawFilename, *NormalizedAbsoluteFilename, *FPaths::EngineDir());
+			return false;
+		}
+
+		if (!FPaths::GetExtension(NormalizedAbsoluteFilename, false).Equals(TEXT("ini"), ESearchCase::IgnoreCase))
+		{
+			UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Non-generated config deletion only supports absolute .ini files. Input='%s', File='%s'."),
+				Operation, *RawFilename, *NormalizedAbsoluteFilename);
+			return false;
+		}
+
+		if (!IFileManager::Get().FileExists(*NormalizedAbsoluteFilename))
+		{
+			UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Config file does not exist. Input='%s', File='%s'."),
+				Operation, *RawFilename, *NormalizedAbsoluteFilename);
+			return false;
+		}
+
+		FDeleteConfigInvalidationPlan InvalidationPlan;
+		CollectDeleteInvalidationPlan(NormalizedAbsoluteFilename, InvalidationPlan);
+
+		const bool bDeleted = IFileManager::Get().Delete(*NormalizedAbsoluteFilename, true, true, false);
+		if (!bDeleted)
+		{
+			UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Unreal file manager could not delete the file. Input='%s', File='%s'."),
+				Operation, *RawFilename, *NormalizedAbsoluteFilename);
+			return false;
+		}
+
+		ApplyDeleteInvalidationPlan(InvalidationPlan);
+		UE_LOG(LogWNTConfig, Log, TEXT("%s completed. Input='%s', File='%s'."), Operation, *RawFilename, *NormalizedAbsoluteFilename);
+		return true;
 	}
 
 	bool ValidateSectionAndKey(const TCHAR* Operation, const FString& Section, const FString& Key)
@@ -322,7 +597,7 @@ namespace WNTConfig::Private
 		}
 
 		UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: GConfig could not read the value even though the file, section, and key exist. ConfigName='%s', File='%s', Section='%s', Key='%s'."),
-			Operation, *ResolvedFilename, *DiskFilename, *Section, *Key);
+				Operation, *ResolvedFilename, *DiskFilename, *Section, *Key);
 	}
 
 	void LogMissingConfigSection(const TCHAR* Operation, const FString& Section, const FString& ResolvedFilename)
@@ -1297,42 +1572,22 @@ bool UConfigurationLibrary::DeleteConfigFile(const FString& Filename)
 		return false;
 	}
 
-	const FString ResolvedFilename = ResolveConfigFilename(Filename);
-	const FString DiskFilename = GetDiskConfigFilename(ResolvedFilename);
-	if (!IsPathInsideDirectory(DiskFilename, FPaths::GeneratedConfigDir()))
+	FString NormalizedAbsoluteFilename;
+	FString FailureReason;
+	switch (ClassifyDeleteConfigFilename(Filename, NormalizedAbsoluteFilename, FailureReason))
 	{
-		UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Delete Config File only deletes generated config files under the project's generated config directory. ConfigName='%s', File='%s', AllowedDirectory='%s'."),
-			Operation, *ResolvedFilename, *DiskFilename, *FPaths::GeneratedConfigDir());
+	case EDeleteConfigFileMode::Generated:
+		return DeleteGeneratedConfigFileInternal(Operation, Filename);
+
+	case EDeleteConfigFileMode::ExternalAbsolute:
+		return DeleteExternalAbsoluteConfigFileInternal(Operation, Filename.TrimStartAndEnd(), NormalizedAbsoluteFilename);
+
+	case EDeleteConfigFileMode::Invalid:
+	default:
+		UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: %s Input='%s'."),
+			Operation, *FailureReason, *Filename.TrimStartAndEnd());
 		return false;
 	}
-
-	if (!FPaths::GetExtension(DiskFilename, false).Equals(TEXT("ini"), ESearchCase::IgnoreCase))
-	{
-		UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Resolved file is not an .ini file. ConfigName='%s', File='%s'."),
-			Operation, *ResolvedFilename, *DiskFilename);
-		return false;
-	}
-
-	if (!IFileManager::Get().FileExists(*DiskFilename))
-	{
-		UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Config file does not exist. ConfigName='%s', File='%s'."),
-			Operation, *ResolvedFilename, *DiskFilename);
-		return false;
-	}
-
-	GConfig->UnloadFile(ResolvedFilename);
-	const bool bDeleted = IFileManager::Get().Delete(*DiskFilename, true, true, false);
-	if (!bDeleted)
-	{
-		UE_LOG(LogWNTConfig, Warning, TEXT("%s failed: Unreal file manager could not delete the file. ConfigName='%s', File='%s'."),
-			Operation, *ResolvedFilename, *DiskFilename);
-		return false;
-	}
-
-	GConfig->UnloadFile(ResolvedFilename);
-	GConfig->Remove(ResolvedFilename);
-	UE_LOG(LogWNTConfig, Log, TEXT("%s completed. ConfigName='%s', File='%s'."), Operation, *ResolvedFilename, *DiskFilename);
-	return true;
 }
 
 bool UConfigurationLibrary::DoesConfigKeyExist(const FString& Section, const FString& Key, const FString& Filename)
@@ -1428,6 +1683,3 @@ bool UConfigurationLibrary::FlushConfig(const FString& Filename)
 		Operation, *ResolvedFilename, *GetDiskConfigFilename(ResolvedFilename));
 	return true;
 }
-
-
-

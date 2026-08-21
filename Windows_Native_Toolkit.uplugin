@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 4,
-	"VersionName": "3.0.1",
+	"Version": 5,
+	"VersionName": "3.1.0",
 	"FriendlyName": "Windows Native Toolkit",
 	"Description": "Windows Native Toolkit exposes Blueprint and C++ access to native Windows audio, hardware, display, process, file, network, Bluetooth, dialog, notification, and config workflows for Unreal Engine projects on Win64.",
 	"Category": "Windows Tools",

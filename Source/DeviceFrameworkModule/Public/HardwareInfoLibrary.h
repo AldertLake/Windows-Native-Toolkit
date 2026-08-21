@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -189,35 +189,24 @@ struct FWNTCommandOptions
     FString WorkingDirectory;
 };
 
+
 /** Result payload returned by asynchronous command execution. */
 USTRUCT(BlueprintType)
 struct FWNTCommandResult
 {
     GENERATED_BODY()
 
-    /** True when the command process started successfully. */
-    UPROPERTY(BlueprintReadOnly, Category = "Command")
-    bool bStarted = false;
-
-    /** True when the command finished before timeout or cancellation. */
-    UPROPERTY(BlueprintReadOnly, Category = "Command")
-    bool bCompleted = false;
-
-    /** True when the command exceeded TimeoutSeconds and was terminated. */
-    UPROPERTY(BlueprintReadOnly, Category = "Command")
-    bool bTimedOut = false;
-
-    /** Process exit code when it is available. */
+    /** Process exit code when it is available. 0 usually indicates success. */
     UPROPERTY(BlueprintReadOnly, Category = "Command")
     int32 ExitCode = -1;
 
     /** Captured standard output for non-admin commands. */
     UPROPERTY(BlueprintReadOnly, Category = "Command")
-    FString StdOut;
+    FString TextOutput;
 
     /** Captured standard error or diagnostic details. */
     UPROPERTY(BlueprintReadOnly, Category = "Command")
-    FString StdErr;
+    FString Error;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FWNTCommandAsyncCompleted, FWNTCommandResult, Result);
@@ -237,8 +226,11 @@ public:
     UPROPERTY(BlueprintAssignable)
     FWNTCommandAsyncCompleted OnFail;
 
-    /** Runs cmd.exe or PowerShell asynchronously without blocking the game thread. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Run Command Async"))
+    /** 
+     * Runs cmd.exe or PowerShell asynchronously without blocking the game thread. 
+     * Note: Output capture is physically impossible when 'Run As Admin' is true, because Windows isolates UAC-elevated processes for security reasons.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Execute CLI Commands"))
     static UAsyncRunCommandAction* RunCommandAsync(const UObject* WorldContextObject, const FString& Command, FWNTCommandOptions Options);
 
     virtual void Activate() override;
@@ -297,7 +289,7 @@ public:
 
     /** Returns adapter information for one specific GPU, including advanced driver details. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Information|GPU", meta = (DisplayName = "Get GPU Information"))
-    static FGPUAdapterInfo GetGPUInformations(int32 Adapter);
+    static FGPUAdapterInfo GetGPUInformation(int32 Adapter);
 
     /** Retrieves the GPU adapter name for a specific adapter. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|System Information|GPU", meta = (DisplayName = "Get GPU Name"))
@@ -348,17 +340,16 @@ public:
     static void RestartGameWithCommandLine(const FString& ExtraCommandLine);
 
     /** Executes a cmd.exe command. Hidden mode avoids opening a command window for normal non-admin commands. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Run Command Prompt Command"))
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DeprecatedFunction, DeprecationMessage = "Use Execute CLI Commands instead.", DisplayName = "Run Command Prompt Command"))
     static bool ExecuteWindowsCMD(const FString& Command, bool bRunAsAdmin, bool bHidden);
 
     /** Executes a PowerShell command. Admin mode uses UAC and cannot be fully silent. */
-    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Run PowerShell Command"))
+    UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DeprecatedFunction, DeprecationMessage = "Use Execute CLI Commands instead.", DisplayName = "Run PowerShell Command"))
     static bool ExecutePowerShell(const FString& Command, bool bRunAsAdmin, bool bHidden);
 
     /** Returns true when hard process termination is allowed in this runtime context. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Can Force Kill Game"))
     static bool CanForceKillGame();
-
     /** Immediately terminates the packaged game process. Refuses to run in editor to protect unsaved work. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Process Management", meta = (DisplayName = "Force Kill Game Process"))
     static void ForceKillGame();

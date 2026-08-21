@@ -1,10 +1,11 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
 // -----------------------------------------------------
 
 #include "BatteryUtility.h"
+#include "SystemUtilityModule.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -25,7 +26,7 @@ FWNTBatteryStatus UBatteryUtility::GetBatteryStatus()
     SYSTEM_POWER_STATUS Status;
     if (!ReadWindowsPowerStatus(Status))
     {
-        UE_LOG(LogTemp, Error, TEXT("Error: Get Battery Status failed because Windows did not return power status."));
+        UE_LOG(LogWNT, Error, TEXT("Get Battery Status failed because Windows did not return power status."));
         return Result;
     }
 
@@ -35,7 +36,7 @@ FWNTBatteryStatus UBatteryUtility::GetBatteryStatus()
     Result.bIsCharging = (Status.BatteryFlag & BATTERY_FLAG_CHARGING) != 0;
     Result.bIsFullyCharged = Status.ACLineStatus == 1 && Status.BatteryLifePercent == 100;
 #else
-    UE_LOG(LogTemp, Error, TEXT("Error: Get Battery Status is only available on Windows."));
+    UE_LOG(LogWNT, Error, TEXT("Get Battery Status is only available on Windows."));
 #endif
     return Result;
 }

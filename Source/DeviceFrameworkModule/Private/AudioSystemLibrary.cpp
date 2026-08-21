@@ -5,6 +5,7 @@
 // -----------------------------------------------------
 
 #include "AudioSystemLibrary.h"
+#include "WNTPrivateUtils.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -43,41 +44,11 @@ struct __declspec(uuid("f8679f50-850a-41cf-9c72-430f290290c8")) IPolicyConfig : 
 
 class __declspec(uuid("870af99c-171d-4f9e-af0d-e63df40c2bc9")) CPolicyConfigClient;
 
-struct FScopedComInit
-{
-    HRESULT Result = E_FAIL;
-    bool bNeedsUninitialize = false;
-
-    FScopedComInit()
-    {
-        Result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        bNeedsUninitialize = SUCCEEDED(Result);
-    }
-
-    ~FScopedComInit()
-    {
-        if (bNeedsUninitialize)
-        {
-            CoUninitialize();
-        }
-    }
-
-    bool IsUsable() const
-    {
-        return SUCCEEDED(Result) || Result == RPC_E_CHANGED_MODE;
-    }
-};
-
 struct FAudioFormatCandidate
 {
     TArray<uint8> Bytes;
     FWNTAudioDeviceFormat Info;
 };
-
-static void LogAudioError(const TCHAR* Context, const FString& Message)
-{
-    UE_LOG(LogTemp, Error, TEXT("Error: %s failed. %s"), Context, *Message);
-}
 
 static EDataFlow ToDataFlow(EWNTAudioDeviceFlow Flow)
 {
@@ -465,14 +436,14 @@ static bool SetDefaultEndpointInternal(const FString& DeviceID, ERole Role, cons
 {
     if (DeviceID.TrimStartAndEnd().IsEmpty())
     {
-        LogAudioError(Context, TEXT("Audio device ID is empty."));
+        WNT_Private::LogWntError(Context, TEXT("Audio device ID is empty."));
         return false;
     }
 
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(Context, TEXT("Failed to initialize COM for audio policy configuration."));
+        WNT_Private::LogWntError(Context, TEXT("Failed to initialize COM for audio policy configuration."));
         return false;
     }
 
@@ -480,14 +451,14 @@ static bool SetDefaultEndpointInternal(const FString& DeviceID, ERole Role, cons
     ComPtr<IPolicyConfig> PolicyConfig;
     if (!CreatePolicyConfig(PolicyConfig, ErrorMessage))
     {
-        LogAudioError(Context, ErrorMessage);
+        WNT_Private::LogWntError(Context, ErrorMessage);
         return false;
     }
 
     const HRESULT Hr = PolicyConfig->SetDefaultEndpoint(*DeviceID, Role);
     if (FAILED(Hr))
     {
-        LogAudioError(Context, FString::Printf(TEXT("Windows rejected the default endpoint request. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
+        WNT_Private::LogWntError(Context, FString::Printf(TEXT("Windows rejected the default endpoint request. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
         return false;
     }
 
@@ -501,7 +472,7 @@ TArray<FAudioDeviceInfo> UAudioSystemLibrary::GetAudioDevices(EWNTAudioDeviceFlo
     TArray<FAudioDeviceInfo> Result;
 
 #if PLATFORM_WINDOWS
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
         return Result;
@@ -511,7 +482,7 @@ TArray<FAudioDeviceInfo> UAudioSystemLibrary::GetAudioDevices(EWNTAudioDeviceFlo
     ComPtr<IMMDeviceEnumerator> Enumerator;
     if (!CreateEnumerator(Enumerator, ErrorMessage))
     {
-        LogAudioError(TEXT("Get Audio Devices"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Get Audio Devices"), ErrorMessage);
         return Result;
     }
 
@@ -553,10 +524,10 @@ bool UAudioSystemLibrary::GetDefaultAudioDevice(EWNTAudioDeviceFlow Flow, EWNTAu
     OutDevice = FAudioDeviceInfo();
 
 #if PLATFORM_WINDOWS
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(TEXT("Get Default Audio Device"), TEXT("Failed to initialize COM for audio device access."));
+        WNT_Private::LogWntError(TEXT("Get Default Audio Device"), TEXT("Failed to initialize COM for audio device access."));
         return false;
     }
 
@@ -564,7 +535,7 @@ bool UAudioSystemLibrary::GetDefaultAudioDevice(EWNTAudioDeviceFlow Flow, EWNTAu
     ComPtr<IMMDeviceEnumerator> Enumerator;
     if (!CreateEnumerator(Enumerator, ErrorMessage))
     {
-        LogAudioError(TEXT("Get Default Audio Device"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Get Default Audio Device"), ErrorMessage);
         return false;
     }
 
@@ -573,19 +544,22 @@ bool UAudioSystemLibrary::GetDefaultAudioDevice(EWNTAudioDeviceFlow Flow, EWNTAu
     const HRESULT Hr = Enumerator->GetDefaultAudioEndpoint(DataFlow, ToRole(Role), &Device);
     if (FAILED(Hr) || !Device)
     {
-        LogAudioError(TEXT("Get Default Audio Device"), FString::Printf(TEXT("Default audio device was not found. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
+        WNT_Private::LogWntError(TEXT("Get Default Audio Device"), FString::Printf(TEXT("Default audio device was not found. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
         return false;
     }
 
-    if (!ReadDeviceInfo(Device.Get(), GetDefaultDeviceId(Enumerator.Get(), DataFlow, eConsole), GetDefaultDeviceId(Enumerator.Get(), DataFlow, eCommunications), OutDevice, ErrorMessage))
+    const FString DefaultId = GetDefaultDeviceId(Enumerator.Get(), DataFlow, eConsole);
+    const FString CommunicationId = GetDefaultDeviceId(Enumerator.Get(), DataFlow, eCommunications);
+
+    if (!ReadDeviceInfo(Device.Get(), DefaultId, CommunicationId, OutDevice, ErrorMessage))
     {
-        LogAudioError(TEXT("Get Default Audio Device"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Get Default Audio Device"), ErrorMessage);
         return false;
     }
 
     return true;
 #else
-    LogAudioError(TEXT("Get Default Audio Device"), TEXT("Audio devices are only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Get Default Audio Device"), TEXT("Audio devices are only available on Windows."));
     return false;
 #endif
 }
@@ -597,7 +571,7 @@ bool UAudioSystemLibrary::SetDefaultAudioDevice(const FString& DeviceID)
     const bool bMultimediaSet = SetDefaultEndpointInternal(DeviceID, eMultimedia, TEXT("Set Default Audio Device"));
     return bConsoleSet && bMultimediaSet;
 #else
-    LogAudioError(TEXT("Set Default Audio Device"), TEXT("Audio devices are only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Set Default Audio Device"), TEXT("Audio devices are only available on Windows."));
     return false;
 #endif
 }
@@ -607,7 +581,7 @@ bool UAudioSystemLibrary::SetCommunicationAudioDevice(const FString& DeviceID)
 #if PLATFORM_WINDOWS
     return SetDefaultEndpointInternal(DeviceID, eCommunications, TEXT("Set Communication Audio Device"));
 #else
-    LogAudioError(TEXT("Set Communication Audio Device"), TEXT("Audio devices are only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Set Communication Audio Device"), TEXT("Audio devices are only available on Windows."));
     return false;
 #endif
 }
@@ -615,10 +589,10 @@ bool UAudioSystemLibrary::SetCommunicationAudioDevice(const FString& DeviceID)
 bool UAudioSystemLibrary::SetAudioDeviceVolume(const FString& DeviceID, float Volume)
 {
 #if PLATFORM_WINDOWS
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(TEXT("Set Audio Volume"), TEXT("Failed to initialize COM for audio volume control."));
+        WNT_Private::LogWntError(TEXT("Set Audio Volume"), TEXT("Failed to initialize COM for audio volume control."));
         return false;
     }
 
@@ -626,20 +600,20 @@ bool UAudioSystemLibrary::SetAudioDeviceVolume(const FString& DeviceID, float Vo
     ComPtr<IAudioEndpointVolume> Endpoint;
     if (!ActivateEndpointVolumeById(DeviceID, Endpoint, ErrorMessage))
     {
-        LogAudioError(TEXT("Set Audio Volume"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Set Audio Volume"), ErrorMessage);
         return false;
     }
 
     const HRESULT Hr = Endpoint->SetMasterVolumeLevelScalar(FMath::Clamp(Volume, 0.0f, 1.0f), nullptr);
     if (FAILED(Hr))
     {
-        LogAudioError(TEXT("Set Audio Volume"), FString::Printf(TEXT("Failed to set audio volume. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
+        WNT_Private::LogWntError(TEXT("Set Audio Volume"), FString::Printf(TEXT("Failed to set audio volume. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
         return false;
     }
 
     return true;
 #else
-    LogAudioError(TEXT("Set Audio Volume"), TEXT("Audio volume is only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Set Audio Volume"), TEXT("Audio volume is only available on Windows."));
     return false;
 #endif
 }
@@ -649,10 +623,10 @@ bool UAudioSystemLibrary::GetAudioDeviceVolume(const FString& DeviceID, float& O
     OutVolume = 0.0f;
 
 #if PLATFORM_WINDOWS
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(TEXT("Get Audio Volume"), TEXT("Failed to initialize COM for audio volume access."));
+        WNT_Private::LogWntError(TEXT("Get Audio Volume"), TEXT("Failed to initialize COM for audio volume access."));
         return false;
     }
 
@@ -660,20 +634,20 @@ bool UAudioSystemLibrary::GetAudioDeviceVolume(const FString& DeviceID, float& O
     ComPtr<IAudioEndpointVolume> Endpoint;
     if (!ActivateEndpointVolumeById(DeviceID, Endpoint, ErrorMessage))
     {
-        LogAudioError(TEXT("Get Audio Volume"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Get Audio Volume"), ErrorMessage);
         return false;
     }
 
     const HRESULT Hr = Endpoint->GetMasterVolumeLevelScalar(&OutVolume);
     if (FAILED(Hr))
     {
-        LogAudioError(TEXT("Get Audio Volume"), FString::Printf(TEXT("Failed to read audio volume. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
+        WNT_Private::LogWntError(TEXT("Get Audio Volume"), FString::Printf(TEXT("Failed to read audio volume. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
         return false;
     }
 
     return true;
 #else
-    LogAudioError(TEXT("Get Audio Volume"), TEXT("Audio volume is only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Get Audio Volume"), TEXT("Audio volume is only available on Windows."));
     return false;
 #endif
 }
@@ -681,10 +655,10 @@ bool UAudioSystemLibrary::GetAudioDeviceVolume(const FString& DeviceID, float& O
 bool UAudioSystemLibrary::SetAudioDeviceMuted(const FString& DeviceID, bool bMuted)
 {
 #if PLATFORM_WINDOWS
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(TEXT("Set Audio Muted"), TEXT("Failed to initialize COM for audio mute control."));
+        WNT_Private::LogWntError(TEXT("Set Audio Muted"), TEXT("Failed to initialize COM for audio mute control."));
         return false;
     }
 
@@ -692,20 +666,20 @@ bool UAudioSystemLibrary::SetAudioDeviceMuted(const FString& DeviceID, bool bMut
     ComPtr<IAudioEndpointVolume> Endpoint;
     if (!ActivateEndpointVolumeById(DeviceID, Endpoint, ErrorMessage))
     {
-        LogAudioError(TEXT("Set Audio Muted"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Set Audio Muted"), ErrorMessage);
         return false;
     }
 
     const HRESULT Hr = Endpoint->SetMute(bMuted ? 1 : 0, nullptr);
     if (FAILED(Hr))
     {
-        LogAudioError(TEXT("Set Audio Muted"), FString::Printf(TEXT("Failed to set the audio mute state. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
+        WNT_Private::LogWntError(TEXT("Set Audio Muted"), FString::Printf(TEXT("Failed to set the audio mute state. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
         return false;
     }
 
     return true;
 #else
-    LogAudioError(TEXT("Set Audio Muted"), TEXT("Audio mute is only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Set Audio Muted"), TEXT("Audio mute is only available on Windows."));
     return false;
 #endif
 }
@@ -715,10 +689,10 @@ bool UAudioSystemLibrary::GetAudioDeviceMuted(const FString& DeviceID, bool& bMu
     bMuted = false;
 
 #if PLATFORM_WINDOWS
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(TEXT("Is Audio Muted"), TEXT("Failed to initialize COM for audio mute access."));
+        WNT_Private::LogWntError(TEXT("Is Audio Muted"), TEXT("Failed to initialize COM for audio mute access."));
         return false;
     }
 
@@ -726,7 +700,7 @@ bool UAudioSystemLibrary::GetAudioDeviceMuted(const FString& DeviceID, bool& bMu
     ComPtr<IAudioEndpointVolume> Endpoint;
     if (!ActivateEndpointVolumeById(DeviceID, Endpoint, ErrorMessage))
     {
-        LogAudioError(TEXT("Is Audio Muted"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Is Audio Muted"), ErrorMessage);
         return false;
     }
 
@@ -734,14 +708,14 @@ bool UAudioSystemLibrary::GetAudioDeviceMuted(const FString& DeviceID, bool& bMu
     const HRESULT Hr = Endpoint->GetMute(&bWindowsMuted);
     if (FAILED(Hr))
     {
-        LogAudioError(TEXT("Is Audio Muted"), FString::Printf(TEXT("Failed to read the audio mute state. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
+        WNT_Private::LogWntError(TEXT("Is Audio Muted"), FString::Printf(TEXT("Failed to read the audio mute state. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
         return false;
     }
 
     bMuted = bWindowsMuted != 0;
     return true;
 #else
-    LogAudioError(TEXT("Is Audio Muted"), TEXT("Audio mute is only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Is Audio Muted"), TEXT("Audio mute is only available on Windows."));
     return false;
 #endif
 }
@@ -751,10 +725,10 @@ bool UAudioSystemLibrary::GetAudioDevicePeak(const FString& DeviceID, float& Out
     OutPeakValue = 0.0f;
 
 #if PLATFORM_WINDOWS
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(TEXT("Get Audio Peak"), TEXT("Failed to initialize COM for audio metering."));
+        WNT_Private::LogWntError(TEXT("Get Audio Peak"), TEXT("Failed to initialize COM for audio metering."));
         return false;
     }
 
@@ -762,7 +736,7 @@ bool UAudioSystemLibrary::GetAudioDevicePeak(const FString& DeviceID, float& Out
     ComPtr<IMMDevice> Device;
     if (!GetDeviceById(DeviceID, Device, ErrorMessage))
     {
-        LogAudioError(TEXT("Get Audio Peak"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Get Audio Peak"), ErrorMessage);
         return false;
     }
 
@@ -770,20 +744,20 @@ bool UAudioSystemLibrary::GetAudioDevicePeak(const FString& DeviceID, float& Out
     const HRESULT ActivateHr = Device->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, nullptr, &Meter);
     if (FAILED(ActivateHr) || !Meter)
     {
-        LogAudioError(TEXT("Get Audio Peak"), FString::Printf(TEXT("Audio metering is not available for this device. HRESULT: 0x%08X"), static_cast<uint32>(ActivateHr)));
+        WNT_Private::LogWntError(TEXT("Get Audio Peak"), FString::Printf(TEXT("Audio metering is not available for this device. HRESULT: 0x%08X"), static_cast<uint32>(ActivateHr)));
         return false;
     }
 
     const HRESULT Hr = Meter->GetPeakValue(&OutPeakValue);
     if (FAILED(Hr))
     {
-        LogAudioError(TEXT("Get Audio Peak"), FString::Printf(TEXT("Failed to read the audio peak value. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
+        WNT_Private::LogWntError(TEXT("Get Audio Peak"), FString::Printf(TEXT("Failed to read the audio peak value. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
         return false;
     }
 
     return true;
 #else
-    LogAudioError(TEXT("Get Audio Peak"), TEXT("Audio metering is only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Get Audio Peak"), TEXT("Audio metering is only available on Windows."));
     return false;
 #endif
 }
@@ -793,10 +767,10 @@ TArray<FWNTAudioDeviceFormat> UAudioSystemLibrary::GetSupportedAudioDeviceFormat
     TArray<FWNTAudioDeviceFormat> Result;
 
 #if PLATFORM_WINDOWS
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(TEXT("Get Supported Audio Device Default Formats"), TEXT("Failed to initialize COM for audio format enumeration."));
+        WNT_Private::LogWntError(TEXT("Get Supported Audio Device Default Formats"), TEXT("Failed to initialize COM for audio format enumeration."));
         return Result;
     }
 
@@ -804,7 +778,7 @@ TArray<FWNTAudioDeviceFormat> UAudioSystemLibrary::GetSupportedAudioDeviceFormat
     const TArray<FAudioFormatCandidate> Formats = QuerySupportedFormatsInternal(DeviceID, ErrorMessage);
     if (Formats.IsEmpty() && !ErrorMessage.IsEmpty())
     {
-        LogAudioError(TEXT("Get Supported Audio Device Default Formats"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Get Supported Audio Device Default Formats"), ErrorMessage);
     }
 
     Result.Reserve(Formats.Num());
@@ -813,7 +787,7 @@ TArray<FWNTAudioDeviceFormat> UAudioSystemLibrary::GetSupportedAudioDeviceFormat
         Result.Add(Format.Info);
     }
 #else
-    LogAudioError(TEXT("Get Supported Audio Device Default Formats"), TEXT("Audio format enumeration is only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Get Supported Audio Device Default Formats"), TEXT("Audio format enumeration is only available on Windows."));
 #endif
 
     return Result;
@@ -822,10 +796,10 @@ TArray<FWNTAudioDeviceFormat> UAudioSystemLibrary::GetSupportedAudioDeviceFormat
 bool UAudioSystemLibrary::SetAudioDeviceDefaultFormat(const FString& DeviceID, int32 FormatIndex)
 {
 #if PLATFORM_WINDOWS
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(TEXT("Set Audio Device Default Format"), TEXT("Failed to initialize COM for audio format configuration."));
+        WNT_Private::LogWntError(TEXT("Set Audio Device Default Format"), TEXT("Failed to initialize COM for audio format configuration."));
         return false;
     }
 
@@ -836,14 +810,14 @@ bool UAudioSystemLibrary::SetAudioDeviceDefaultFormat(const FString& DeviceID, i
         const FString Reason = ErrorMessage.IsEmpty()
             ? TEXT("The requested format index is invalid.")
             : ErrorMessage;
-        LogAudioError(TEXT("Set Audio Device Default Format"), Reason);
+        WNT_Private::LogWntError(TEXT("Set Audio Device Default Format"), Reason);
         return false;
     }
 
     ComPtr<IPolicyConfig> PolicyConfig;
     if (!CreatePolicyConfig(PolicyConfig, ErrorMessage))
     {
-        LogAudioError(TEXT("Set Audio Device Default Format"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Set Audio Device Default Format"), ErrorMessage);
         return false;
     }
 
@@ -851,13 +825,13 @@ bool UAudioSystemLibrary::SetAudioDeviceDefaultFormat(const FString& DeviceID, i
     const HRESULT Hr = PolicyConfig->SetDeviceFormat(*DeviceID, Format, Format);
     if (FAILED(Hr))
     {
-        LogAudioError(TEXT("Set Audio Device Default Format"), FString::Printf(TEXT("Windows rejected the audio format change. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
+        WNT_Private::LogWntError(TEXT("Set Audio Device Default Format"), FString::Printf(TEXT("Windows rejected the audio format change. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
         return false;
     }
 
     return true;
 #else
-    LogAudioError(TEXT("Set Audio Device Default Format"), TEXT("Audio format configuration is only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Set Audio Device Default Format"), TEXT("Audio format configuration is only available on Windows."));
     return false;
 #endif
 }
@@ -867,14 +841,14 @@ bool UAudioSystemLibrary::SetAudioDeviceEnabled(const FString& DeviceID, bool bE
 #if PLATFORM_WINDOWS
     if (DeviceID.TrimStartAndEnd().IsEmpty())
     {
-        LogAudioError(TEXT("Set Audio Device Visibility"), TEXT("Audio device ID is empty."));
+        WNT_Private::LogWntError(TEXT("Set Audio Device Visibility"), TEXT("Audio device ID is empty."));
         return false;
     }
 
-    FScopedComInit ComInit;
+    WNT_Private::FScopedComInit ComInit;
     if (!ComInit.IsUsable())
     {
-        LogAudioError(TEXT("Set Audio Device Visibility"), TEXT("Failed to initialize COM for audio endpoint configuration."));
+        WNT_Private::LogWntError(TEXT("Set Audio Device Visibility"), TEXT("Failed to initialize COM for audio endpoint configuration."));
         return false;
     }
 
@@ -882,20 +856,20 @@ bool UAudioSystemLibrary::SetAudioDeviceEnabled(const FString& DeviceID, bool bE
     ComPtr<IPolicyConfig> PolicyConfig;
     if (!CreatePolicyConfig(PolicyConfig, ErrorMessage))
     {
-        LogAudioError(TEXT("Set Audio Device Visibility"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Set Audio Device Visibility"), ErrorMessage);
         return false;
     }
 
     const HRESULT Hr = PolicyConfig->SetEndpointVisibility(*DeviceID, bEnabled ? 1 : 0);
     if (FAILED(Hr))
     {
-        LogAudioError(TEXT("Set Audio Device Visibility"), FString::Printf(TEXT("Windows rejected the endpoint visibility change. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
+        WNT_Private::LogWntError(TEXT("Set Audio Device Visibility"), FString::Printf(TEXT("Windows rejected the endpoint visibility change. HRESULT: 0x%08X"), static_cast<uint32>(Hr)));
         return false;
     }
 
     return true;
 #else
-    LogAudioError(TEXT("Set Audio Device Visibility"), TEXT("Audio endpoint configuration is only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Set Audio Device Visibility"), TEXT("Audio endpoint configuration is only available on Windows."));
     return false;
 #endif
 }

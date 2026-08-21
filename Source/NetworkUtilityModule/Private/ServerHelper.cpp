@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -73,6 +73,10 @@ static size_t WriteCallback(void* ptr, size_t size, size_t nmemb, void* stream)
     {
         int64 BytesToWrite = (int64)(size * nmemb);
         Context->FileArchive->Serialize(ptr, BytesToWrite);
+        if (Context->FileArchive->IsError())
+        {
+            return 0;
+        }
         return (size_t)BytesToWrite;
     }
     return 0;
@@ -97,6 +101,10 @@ static size_t ReadCallback(void* ptr, size_t size, size_t nmemb, void* stream)
         if (BytesToRead > Remaining) BytesToRead = Remaining;
 
         Context->FileArchive->Serialize(ptr, BytesToRead);
+        if (Context->FileArchive->IsError())
+        {
+            return CURL_READFUNC_ABORT;
+        }
         return (size_t)BytesToRead;
     }
     return 0;
@@ -130,6 +138,7 @@ static int ProgressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
         if (Context->ProgressDelegate.IsBound())
         {
             FOnTransferProgress DelegateCopy = Context->ProgressDelegate;
+
             AsyncTask(ENamedThreads::GameThread, [DelegateCopy, Percent]()
             {
                 DelegateCopy.ExecuteIfBound(Percent);
@@ -141,10 +150,14 @@ static int ProgressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
 
 static void SetupCurlOptions(CURL* Curl, const FString& URL, const FString& User, const FString& Password, FCurlContext* Context)
 {
-    FString Auth = User + ":" + Password;
+    curl_easy_setopt(Curl, CURLOPT_URL, TCHAR_TO_UTF8(*URL));
 
-    curl_easy_setopt(Curl, CURLOPT_URL, TCHAR_TO_ANSI(*URL));
-    curl_easy_setopt(Curl, CURLOPT_USERPWD, TCHAR_TO_ANSI(*Auth));
+    if (!User.IsEmpty())
+    {
+        FString Auth = Password.IsEmpty() ? User : (User + TEXT(":") + Password);
+        curl_easy_setopt(Curl, CURLOPT_USERPWD, TCHAR_TO_UTF8(*Auth));
+    }
+
     curl_easy_setopt(Curl, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(Curl, CURLOPT_TIMEOUT, 600L);
 
@@ -153,6 +166,11 @@ static void SetupCurlOptions(CURL* Curl, const FString& URL, const FString& User
     curl_easy_setopt(Curl, CURLOPT_FTP_CREATE_MISSING_DIRS, 2L);
     curl_easy_setopt(Curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(Curl, CURLOPT_SSL_VERIFYHOST, 2L);
+
+#if defined(CURLSSLOPT_NATIVE_CA)
+    curl_easy_setopt(Curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
+#endif
+
     curl_easy_setopt(Curl, CURLOPT_NOSIGNAL, 1L);
 
     curl_easy_setopt(Curl, CURLOPT_NOPROGRESS, 0L);
@@ -249,6 +267,10 @@ FNetworkTransferHandle UServerHelper::UploadFileFTP(FString URL, FString User, F
 
                     Reader->Close();
                 }
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("FTP: Failed to open local file for reading: %s"), *LocalFilePath);
+                }
             }
         }
         else
@@ -286,6 +308,9 @@ FNetworkTransferHandle UServerHelper::DownloadFileFTP(FString URL, FString User,
                 return;
             }
 
+            FString SanitizedURL = URL.TrimStartAndEnd();
+            SanitizedURL.ReplaceInline(TEXT(" "), TEXT("%20"));
+
             FString FullSavePath = FPaths::Combine(SaveDirectory, FileName);
 
             if (!EnsureDirectoryExists(SaveDirectory, TEXT("Download File Using FTP")))
@@ -304,7 +329,7 @@ FNetworkTransferHandle UServerHelper::DownloadFileFTP(FString URL, FString User,
                 Context.ProgressDelegate = OnProgress;
                 Context.bIsUpload = false;
 
-                SetupCurlOptions(CurlPtr.Get(), URL, User, Password, &Context);
+                SetupCurlOptions(CurlPtr.Get(), SanitizedURL, User, Password, &Context);
 
                 curl_easy_setopt(CurlPtr.Get(), CURLOPT_WRITEFUNCTION, WriteCallback);
                 curl_easy_setopt(CurlPtr.Get(), CURLOPT_WRITEDATA, &Context);
@@ -328,6 +353,10 @@ FNetworkTransferHandle UServerHelper::DownloadFileFTP(FString URL, FString User,
                     PlatformFile.DeleteFile(*FullSavePath);
                     bSuccess = false;
                 }
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Error: Download File Using FTP failed because output file could not be created on disk: %s"), *FullSavePath);
             }
         }
 #else
@@ -540,5 +569,3 @@ FNetworkTransferHandle UServerHelper::DownloadAdvanced(FString URL, FString Save
     Request->ProcessRequest();
     return Handle;
 }
-
-

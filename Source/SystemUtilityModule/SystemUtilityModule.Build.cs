@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -22,7 +22,8 @@ public class SystemUtilityModule : ModuleRules
         PrivateDependencyModuleNames.AddRange(new string[]
         {
             "Slate",
-            "SlateCore"
+            "SlateCore",
+            "ImageWrapper"
         });
 
         if (Target.Platform == UnrealTargetPlatform.Win64)
@@ -39,5 +40,3 @@ public class SystemUtilityModule : ModuleRules
         }
     }
 }
-
-

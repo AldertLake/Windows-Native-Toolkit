@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -58,14 +58,37 @@ struct FScopedComInit
 }
 #endif
 
+#if PLATFORM_WINDOWS
 namespace
 {
-    static TArray<FString> GetPublicIPProviderUrls();
-    static FString GetDefaultInternetAccessUrl();
-    static float GetDefaultInternetAccessTimeoutSeconds();
-    static float GetDefaultPingTimeoutSeconds();
-    static float GetDefaultPublicIPTimeoutSeconds();
+    /** Initial buffer size for GetAdaptersAddresses; covers most machines without a retry. */
+    constexpr ULONG kDefaultAdapterBufferSize = 15000;
 
+    /**
+     * Shared helper that calls GetAdaptersAddresses with automatic retry on ERROR_BUFFER_OVERFLOW.
+     * On success the caller can reinterpret_cast<PIP_ADAPTER_ADDRESSES>(OutBuffer.GetData()).
+     */
+    static bool QueryAdapterAddresses(ULONG Family, ULONG Flags, TArray<uint8>& OutBuffer)
+    {
+        ULONG BufLen = kDefaultAdapterBufferSize;
+        OutBuffer.SetNumUninitialized(BufLen);
+        PIP_ADAPTER_ADDRESSES Addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(OutBuffer.GetData());
+
+        DWORD Result = GetAdaptersAddresses(Family, Flags, nullptr, Addresses, &BufLen);
+        if (Result == ERROR_BUFFER_OVERFLOW)
+        {
+            OutBuffer.SetNumUninitialized(BufLen);
+            Addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(OutBuffer.GetData());
+            Result = GetAdaptersAddresses(Family, Flags, nullptr, Addresses, &BufLen);
+        }
+
+        return Result == NO_ERROR;
+    }
+}
+#endif
+
+namespace
+{
     static void LogNetworkError(const TCHAR* Context, const FString& Message)
     {
         UE_LOG(LogTemp, Error, TEXT("Error: %s failed. %s"), Context, *Message);
@@ -76,6 +99,12 @@ namespace
         if (!Address || Length == 0)
         {
             return FString();
+        }
+
+        if (Length == 6)
+        {
+            return FString::Printf(TEXT("%02X:%02X:%02X:%02X:%02X:%02X"),
+                Address[0], Address[1], Address[2], Address[3], Address[4], Address[5]);
         }
 
         TArray<FString> Parts;
@@ -248,7 +277,7 @@ void UAsyncPingAddressAction::Activate()
             PADDRINFOA res = nullptr;
             hints.ai_family = AF_INET;
 
-            if (GetAddrInfoA(TCHAR_TO_ANSI(*AddressCopy), nullptr, &hints, &res) == 0 && res != nullptr)
+            if (GetAddrInfoA(TCHAR_TO_UTF8(*AddressCopy), nullptr, &hints, &res) == 0 && res != nullptr)
             {
                 sockaddr_in* ipv4 = reinterpret_cast<sockaddr_in*>(res->ai_addr);
                 IPAddr destIp = ipv4->sin_addr.S_un.S_addr;
@@ -260,7 +289,7 @@ void UAsyncPingAddressAction::Activate()
                 ReplyBuffer.SetNumZeroed(ReplySize);
 
                 DWORD dwRetVal = IcmpSendEcho(hIcmpFile, destIp, SendData, sizeof(SendData),
-                    nullptr, ReplyBuffer.GetData(), ReplySize, FMath::Max(100.0f, TimeoutCopy * 1000.0f));
+                    nullptr, ReplyBuffer.GetData(), ReplySize, static_cast<DWORD>(FMath::Max(100.0f, TimeoutCopy * 1000.0f)));
 
                 if (dwRetVal != 0)
                 {
@@ -345,7 +374,7 @@ void UAsyncResolveDomainAction::Activate()
         PADDRINFOA res = nullptr;
         hints.ai_family = AF_INET;
 
-        if (GetAddrInfoA(TCHAR_TO_ANSI(*HostnameCopy), nullptr, &hints, &res) == 0 && res != nullptr)
+        if (GetAddrInfoA(TCHAR_TO_UTF8(*HostnameCopy), nullptr, &hints, &res) == 0 && res != nullptr)
         {
             sockaddr_in* ipv4 = reinterpret_cast<sockaddr_in*>(res->ai_addr);
             char ipStr[INET_ADDRSTRLEN];
@@ -573,48 +602,40 @@ bool UNetworkUtilities::IsConnectedToInternet()
 ENetworkWindowsType UNetworkUtilities::GetConnectionType()
 {
 #if PLATFORM_WINDOWS
-    ULONG OutBufLen = 15000;
     TArray<uint8> Buffer;
-    Buffer.SetNumUninitialized(OutBufLen);
-    PIP_ADAPTER_ADDRESSES pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
-
-    DWORD dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, pAddresses, &OutBufLen);
-
-    if (dwRetVal == ERROR_BUFFER_OVERFLOW)
-    {
-        Buffer.SetNumUninitialized(OutBufLen);
-        pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
-        dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, pAddresses, &OutBufLen);
-    }
-
-    if (dwRetVal != NO_ERROR)
+    if (!QueryAdapterAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, Buffer))
     {
         return ENetworkWindowsType::None;
     }
 
+    PIP_ADAPTER_ADDRESSES pAddresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(Buffer.GetData());
     bool bHasWifi = false;
     bool bHasEthernet = false;
+    bool bHasOther = false;
 
-    PIP_ADAPTER_ADDRESSES pCurrAddresses = pAddresses;
-    while (pCurrAddresses)
+    for (PIP_ADAPTER_ADDRESSES pCurr = pAddresses; pCurr; pCurr = pCurr->Next)
     {
-        if (pCurrAddresses->OperStatus == IfOperStatusUp && pCurrAddresses->FirstGatewayAddress != nullptr)
+        if (pCurr->OperStatus == IfOperStatusUp && pCurr->FirstGatewayAddress != nullptr)
         {
-            if (pCurrAddresses->IfType == IF_TYPE_IEEE80211)
+            if (pCurr->IfType == IF_TYPE_IEEE80211)
             {
                 bHasWifi = true;
             }
-            else if (pCurrAddresses->IfType == IF_TYPE_ETHERNET_CSMACD)
+            else if (pCurr->IfType == IF_TYPE_ETHERNET_CSMACD)
             {
                 bHasEthernet = true;
             }
+            else
+            {
+                bHasOther = true;
+            }
         }
-        pCurrAddresses = pCurrAddresses->Next;
     }
 
     if (bHasEthernet && bHasWifi) return ENetworkWindowsType::Both;
     if (bHasEthernet) return ENetworkWindowsType::Ethernet;
     if (bHasWifi) return ENetworkWindowsType::WiFi;
+    if (bHasOther) return ENetworkWindowsType::Other;
 
     return ENetworkWindowsType::None;
 #else
@@ -627,34 +648,20 @@ TArray<FNetworkInterfaceInfo> UNetworkUtilities::GetAvailableInterfaces()
     TArray<FNetworkInterfaceInfo> ResultArray;
 
 #if PLATFORM_WINDOWS
-    ULONG OutBufLen = 15000;
     TArray<uint8> Buffer;
-    Buffer.SetNumUninitialized(OutBufLen);
-    PIP_ADAPTER_ADDRESSES pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
-
-    DWORD dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, pAddresses, &OutBufLen);
-
-    if (dwRetVal == ERROR_BUFFER_OVERFLOW)
+    if (QueryAdapterAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, Buffer))
     {
-        Buffer.SetNumUninitialized(OutBufLen);
-        pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
-        dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, pAddresses, &OutBufLen);
-    }
-
-    if (dwRetVal == NO_ERROR)
-    {
-        PIP_ADAPTER_ADDRESSES pCurrAddresses = pAddresses;
-        while (pCurrAddresses)
+        for (PIP_ADAPTER_ADDRESSES pCurr = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(Buffer.GetData()); pCurr; pCurr = pCurr->Next)
         {
-            if (pCurrAddresses->OperStatus == IfOperStatusUp)
+            if (pCurr->OperStatus == IfOperStatusUp)
             {
                 ENetworkWindowsType FoundType = ENetworkWindowsType::None;
 
-                if (pCurrAddresses->IfType == IF_TYPE_IEEE80211)
+                if (pCurr->IfType == IF_TYPE_IEEE80211)
                 {
                     FoundType = ENetworkWindowsType::WiFi;
                 }
-                else if (pCurrAddresses->IfType == IF_TYPE_ETHERNET_CSMACD)
+                else if (pCurr->IfType == IF_TYPE_ETHERNET_CSMACD)
                 {
                     FoundType = ENetworkWindowsType::Ethernet;
                 }
@@ -664,25 +671,24 @@ TArray<FNetworkInterfaceInfo> UNetworkUtilities::GetAvailableInterfaces()
                     FNetworkInterfaceInfo Info;
                     Info.Type = FoundType;
 
-                    if (pCurrAddresses->AdapterName)
+                    if (pCurr->AdapterName)
                     {
-                        Info.InterfaceID = FString(UTF8_TO_TCHAR(pCurrAddresses->AdapterName));
+                        Info.InterfaceID = FString(UTF8_TO_TCHAR(pCurr->AdapterName));
                     }
 
-                    if (pCurrAddresses->FriendlyName)
+                    if (pCurr->FriendlyName)
                     {
-                        Info.InterfaceName = FString(pCurrAddresses->FriendlyName);
+                        Info.InterfaceName = FString(pCurr->FriendlyName);
                     }
 
-                    if (pCurrAddresses->Description)
+                    if (pCurr->Description)
                     {
-                        Info.HardwareName = FString(pCurrAddresses->Description);
+                        Info.HardwareName = FString(pCurr->Description);
                     }
 
                     ResultArray.Add(Info);
                 }
             }
-            pCurrAddresses = pCurrAddresses->Next;
         }
     }
 #endif
@@ -693,7 +699,7 @@ TArray<FNetworkInterfaceInfo> UNetworkUtilities::GetAvailableInterfaces()
 FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
 {
     FWiFiNetworkInfo Info;
-    Info.SSID = TEXT("None");
+    bool bInterfaceFound = false;
 
 #if PLATFORM_WINDOWS
     HANDLE hClient = NULL;
@@ -713,7 +719,7 @@ FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
     dwResult = WlanEnumInterfaces(hClient, NULL, &pIfList);
     if (dwResult == ERROR_SUCCESS && pIfList != NULL)
     {
-        for (int i = 0; i < (int)pIfList->dwNumberOfItems; i++)
+        for (DWORD i = 0; i < pIfList->dwNumberOfItems; i++)
         {
             PWLAN_INTERFACE_INFO pIfInfo = &pIfList->InterfaceInfo[i];
 
@@ -725,6 +731,7 @@ FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
 
                 if (ConvertedGUID.Equals(InterfaceID, ESearchCase::IgnoreCase))
                 {
+                    bInterfaceFound = true;
                     DWORD connectSize = 0;
                     dwResult = WlanQueryInterface(
                         hClient,
@@ -753,8 +760,7 @@ FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
                             Info.SignalQuality = pConnectInfo->wlanAssociationAttributes.wlanSignalQuality;
                             Info.bSuccess = true;
 
-                            uint8* mac = pConnectInfo->wlanAssociationAttributes.dot11Bssid;
-                            Info.BSSID = FString::Printf(TEXT("%02X:%02X:%02X:%02X:%02X:%02X"), mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+                            Info.BSSID = FormatMacAddress(pConnectInfo->wlanAssociationAttributes.dot11Bssid, 6);
 
                             switch (pConnectInfo->wlanSecurityAttributes.dot11AuthAlgorithm)
                             {
@@ -784,7 +790,7 @@ FWiFiNetworkInfo UNetworkUtilities::GetDetailedWiFiInfo(FString InterfaceID)
     }
     WlanCloseHandle(hClient, NULL);
 #endif
-    if (!Info.bSuccess && Info.SSID.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+    if (!Info.bSuccess && !bInterfaceFound)
     {
         LogNetworkError(TEXT("Get Detailed Wi-Fi Info"), TEXT("Wi-Fi information was not found."));
     }
@@ -797,26 +803,14 @@ FEthernetNetworkInfo UNetworkUtilities::GetDetailedEthernetInfo(FString Interfac
     FEthernetNetworkInfo Info;
 
 #if PLATFORM_WINDOWS
-    ULONG OutBufLen = 15000;
     TArray<uint8> Buffer;
-    Buffer.SetNumUninitialized(OutBufLen);
-    PIP_ADAPTER_ADDRESSES Addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(Buffer.GetData());
-
-    DWORD ResultCode = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, nullptr, Addresses, &OutBufLen);
-    if (ResultCode == ERROR_BUFFER_OVERFLOW)
-    {
-        Buffer.SetNumUninitialized(OutBufLen);
-        Addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(Buffer.GetData());
-        ResultCode = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, nullptr, Addresses, &OutBufLen);
-    }
-
-    if (ResultCode != NO_ERROR)
+    if (!QueryAdapterAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, Buffer))
     {
         LogNetworkError(TEXT("Get Detailed Ethernet Info"), TEXT("Windows failed to enumerate network adapters."));
         return Info;
     }
 
-    for (PIP_ADAPTER_ADDRESSES Current = Addresses; Current; Current = Current->Next)
+    for (PIP_ADAPTER_ADDRESSES Current = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(Buffer.GetData()); Current; Current = Current->Next)
     {
         if (Current->IfType != IF_TYPE_ETHERNET_CSMACD || !Current->AdapterName)
         {
@@ -834,10 +828,22 @@ FEthernetNetworkInfo UNetworkUtilities::GetDetailedEthernetInfo(FString Interfac
         {
             Info.InterfaceName = FString(Current->FriendlyName);
         }
-        Info.IPv4Address = GetLocalIpForInterface(CurrentId);
+
+        for (PIP_ADAPTER_UNICAST_ADDRESS pUnicast = Current->FirstUnicastAddress; pUnicast; pUnicast = pUnicast->Next)
+        {
+            if (pUnicast->Address.lpSockaddr->sa_family == AF_INET)
+            {
+                sockaddr_in* pSockAddr = reinterpret_cast<sockaddr_in*>(pUnicast->Address.lpSockaddr);
+                char ipStr[INET_ADDRSTRLEN];
+                InetNtopA(AF_INET, &(pSockAddr->sin_addr), ipStr, INET_ADDRSTRLEN);
+                Info.IPv4Address = FString(UTF8_TO_TCHAR(ipStr));
+                break;
+            }
+        }
+
         Info.MACAddress = FormatMacAddress(Current->PhysicalAddress, Current->PhysicalAddressLength);
         Info.LinkSpeedMbps = static_cast<int64>(FMath::Max<uint64>(Current->TransmitLinkSpeed, Current->ReceiveLinkSpeed) / 1000000ULL);
-        Info.bDhcpEnabled = Current->Dhcpv4Server.iSockaddrLength > 0;
+        Info.bDhcpEnabled = (Current->Flags & IP_ADAPTER_DHCP_ENABLED) != 0;
         Info.bSuccess = true;
         return Info;
     }
@@ -853,55 +859,41 @@ FEthernetNetworkInfo UNetworkUtilities::GetDetailedEthernetInfo(FString Interfac
 FString UNetworkUtilities::GetLocalIpForInterface(FString InterfaceID)
 {
 #if PLATFORM_WINDOWS
-    ULONG OutBufLen = 15000;
     TArray<uint8> Buffer;
-    Buffer.SetNumUninitialized(OutBufLen);
-    PIP_ADAPTER_ADDRESSES pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
-
-    DWORD dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, pAddresses, &OutBufLen);
-
-    if (dwRetVal == ERROR_BUFFER_OVERFLOW)
+    if (!QueryAdapterAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, Buffer))
     {
-        Buffer.SetNumUninitialized(OutBufLen);
-        pAddresses = (PIP_ADAPTER_ADDRESSES)Buffer.GetData();
-        dwRetVal = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, pAddresses, &OutBufLen);
+        return FString();
     }
 
-    FString FoundIP = TEXT("");
-
-    if (dwRetVal == NO_ERROR)
+    for (PIP_ADAPTER_ADDRESSES pCurr = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(Buffer.GetData()); pCurr; pCurr = pCurr->Next)
     {
-        PIP_ADAPTER_ADDRESSES pCurrAddresses = pAddresses;
-        while (pCurrAddresses)
+        if (!pCurr->AdapterName)
         {
-            if (pCurrAddresses->AdapterName)
-            {
-                FString CurrentID = FString(UTF8_TO_TCHAR(pCurrAddresses->AdapterName));
-
-                if (CurrentID == InterfaceID)
-                {
-                    PIP_ADAPTER_UNICAST_ADDRESS pUnicast = pCurrAddresses->FirstUnicastAddress;
-                    while (pUnicast)
-                    {
-                        if (pUnicast->Address.lpSockaddr->sa_family == AF_INET)
-                        {
-                            sockaddr_in* pSockAddr = (sockaddr_in*)pUnicast->Address.lpSockaddr;
-                            char ipStr[INET_ADDRSTRLEN];
-                            InetNtopA(AF_INET, &(pSockAddr->sin_addr), ipStr, INET_ADDRSTRLEN);
-                            FoundIP = FString(UTF8_TO_TCHAR(ipStr));
-                            break;
-                        }
-                        pUnicast = pUnicast->Next;
-                    }
-                    break;
-                }
-            }
-            pCurrAddresses = pCurrAddresses->Next;
+            continue;
         }
+
+        const FString CurrentID = FString(UTF8_TO_TCHAR(pCurr->AdapterName));
+        if (CurrentID != InterfaceID)
+        {
+            continue;
+        }
+
+        for (PIP_ADAPTER_UNICAST_ADDRESS pUnicast = pCurr->FirstUnicastAddress; pUnicast; pUnicast = pUnicast->Next)
+        {
+            if (pUnicast->Address.lpSockaddr->sa_family == AF_INET)
+            {
+                sockaddr_in* pSockAddr = reinterpret_cast<sockaddr_in*>(pUnicast->Address.lpSockaddr);
+                char ipStr[INET_ADDRSTRLEN];
+                InetNtopA(AF_INET, &(pSockAddr->sin_addr), ipStr, INET_ADDRSTRLEN);
+                return FString(UTF8_TO_TCHAR(ipStr));
+            }
+        }
+        break;
     }
-    return FoundIP;
+
+    return FString();
 #else
-    return TEXT("");
+    return FString();
 #endif
 }
 

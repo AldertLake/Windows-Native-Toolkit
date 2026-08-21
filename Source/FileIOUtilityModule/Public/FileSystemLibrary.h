@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -164,45 +164,45 @@ public:
     UPROPERTY(BlueprintAssignable)
     FWNTFileOperationCompleted OnFail;
 
-    /** Moves a file into a destination folder without blocking the game thread. */
+    /** Moves a file into a destination folder. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Move File To Path"))
-    static UAsyncFileSystemOperation* MoveFileToFolder(const UObject* WorldContextObject, const FString& Source, const FString& Destination, bool bOverwrite);
+    static UAsyncFileSystemOperation* MoveFileToFolder(const UObject* WorldContextObject, const FString& File, const FString& DestinationFolder, bool bOverwrite);
 
-    /** Moves a folder into a destination folder without blocking the game thread. */
+    /** Moves a folder into a destination folder. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Move Folder To Path"))
-    static UAsyncFileSystemOperation* MoveFolderToFolder(const UObject* WorldContextObject, const FString& Source, const FString& Destination, bool bOverwrite);
+    static UAsyncFileSystemOperation* MoveFolderToFolder(const UObject* WorldContextObject, const FString& Folder, const FString& DestinationFolder, bool bOverwrite);
 
-    /** Copies a file into a destination folder without blocking the game thread. */
+    /** Copies a file into a destination folder. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Copy File To Path"))
-    static UAsyncFileSystemOperation* CopyFileToFolder(const UObject* WorldContextObject, const FString& Source, const FString& Destination, bool bOverwrite);
+    static UAsyncFileSystemOperation* CopyFileToFolder(const UObject* WorldContextObject, const FString& File, const FString& DestinationFolder, bool bOverwrite);
 
-    /** Copies a folder into a destination folder without blocking the game thread. */
+    /** Copies a folder into a destination folder. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Copy Folder To Path"))
-    static UAsyncFileSystemOperation* CopyFolderToFolder(const UObject* WorldContextObject, const FString& Source, const FString& Destination, bool bOverwrite);
+    static UAsyncFileSystemOperation* CopyFolderToFolder(const UObject* WorldContextObject, const FString& Folder, const FString& DestinationFolder, bool bOverwrite);
 
-    /** Permanently deletes a file after safety validation without blocking the game thread. */
+    /** Permanently deletes a file after safety validation. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Delete File"))
-    static UAsyncFileSystemOperation* DeleteFileW(const UObject* WorldContextObject, const FString& Path);
+    static UAsyncFileSystemOperation* DeleteFileW(const UObject* WorldContextObject, const FString& File);
 
-    /** Permanently deletes a folder after safety validation without blocking the game thread. */
+    /** Permanently deletes a folder after safety validation. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Delete Folder"))
-    static UAsyncFileSystemOperation* DeleteFolder(const UObject* WorldContextObject, const FString& Path);
+    static UAsyncFileSystemOperation* DeleteFolder(const UObject* WorldContextObject, const FString& Folder);
 
     /** Moves a file to the Windows Recycle Bin instead of deleting it permanently. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Recycle File"))
-    static UAsyncFileSystemOperation* RecycleFile(const UObject* WorldContextObject, const FString& FilePath);
+    static UAsyncFileSystemOperation* RecycleFile(const UObject* WorldContextObject, const FString& File);
 
     /** Moves a folder to the Windows Recycle Bin instead of deleting it permanently. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Recycle Folder"))
-    static UAsyncFileSystemOperation* RecycleFolder(const UObject* WorldContextObject, const FString& FolderPath);
+    static UAsyncFileSystemOperation* RecycleFolder(const UObject* WorldContextObject, const FString& Folder);
 
-    /** Renames a file in place without blocking the game thread. Include the extension in NewFileName when the file should keep one. */
+    /** Renames a file in place. Include the extension in NewFileName when the file should keep one. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Rename File"))
-    static UAsyncFileSystemOperation* RenameFile(const UObject* WorldContextObject, const FString& FilePath, const FString& NewFileName, bool bOverwrite);
+    static UAsyncFileSystemOperation* RenameFile(const UObject* WorldContextObject, const FString& File, const FString& NewFileName, bool bOverwrite);
 
-    /** Renames a folder in place without blocking the game thread. */
+    /** Renames a folder in place. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Rename Folder"))
-    static UAsyncFileSystemOperation* RenameFolder(const UObject* WorldContextObject, const FString& FolderPath, const FString& NewFolderName, bool bOverwrite);
+    static UAsyncFileSystemOperation* RenameFolder(const UObject* WorldContextObject, const FString& Folder, const FString& NewFolderName, bool bOverwrite);
 
     virtual void Activate() override;
 
@@ -254,9 +254,9 @@ public:
     UPROPERTY(BlueprintAssignable)
     FOnFolderSizeCalculated OnFail;
 
-    /** Calculates a folder size on a background thread and keeps the async action alive through the GameInstance. */
+    /** Calculates a folder's total size in bytes. */
     UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Get Folder Size"), Category = "Windows Native Toolkit|Files Management")
-    static UAsyncGetFolderSize* GetFolderSize(const UObject* WorldContextObject, const FString& FolderPath);
+    static UAsyncGetFolderSize* GetFolderSize(const UObject* WorldContextObject, const FString& Folder);
 
     /** Requests cancellation. Completion delegates are always broadcast on the game thread. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (DisplayName = "Cancel Folder Size Task"))
@@ -279,15 +279,15 @@ class FILEIOUTILITYMODULE_API UFileSystemLibrary : public UBlueprintFunctionLibr
 public:
     /** Returns metadata for one file path. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Files Management", meta = (DisplayName = "Get File Info"))
-    static FWNTFileInfo GetFileInfo(const FString& FilePath);
+    static FWNTFileInfo GetFileInfo(const FString& File);
 
-    /** Returns metadata for one folder path. Folder size is intentionally handled by Get Folder Size to avoid blocking the game thread. */
+    /** Returns metadata for one folder path. Folder size is intentionally handled by Get Folder Size for performance. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Files Management", meta = (DisplayName = "Get Folder Info"))
-    static FWNTFolderInfo GetFolderInfo(const FString& FolderPath);
+    static FWNTFolderInfo GetFolderInfo(const FString& Folder);
 
     /** Opens Windows Explorer and selects the specified file or folder. */
     UFUNCTION(BlueprintCallable, Category = "Windows Native Toolkit|Files Management", meta = (DisplayName = "Show File In Explorer"))
-    static void ShowFileInExplorer(const FString& FilePath);
+    static void ShowFileInExplorer(const FString& File);
 
     /** Returns available drives and basic capacity information. */
     UFUNCTION(BlueprintPure, Category = "Windows Native Toolkit|Files Management", meta = (DisplayName = "Get Drives"))

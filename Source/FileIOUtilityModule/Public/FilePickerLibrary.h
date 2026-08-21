@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
@@ -60,13 +60,5 @@ public:
     );
 
 private:
-    static bool OpenFileFolderPicker(
-        const FString& DialogTitle,
-        const FString& DefaultPath,
-        const FString& FileTypes,
-        bool bAllowMultiple,
-        EFilePickerType PickerType,
-        TArray<FString>& OutFilenames
-    );
 };
 

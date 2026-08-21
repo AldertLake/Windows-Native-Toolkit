@@ -1,10 +1,11 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
 // -----------------------------------------------------
 
 #include "RefreshRateFunctionLibrary.h"
+#include "SystemUtilityModule.h"
 
 #include "Async/Async.h"
 #include "Engine/Engine.h"
@@ -21,8 +22,11 @@
 #if PLATFORM_WINDOWS
 static void LogDisplayError(const TCHAR* Context, const FString& Message)
 {
-	UE_LOG(LogTemp, Error, TEXT("Error: %s failed. %s"), Context, *Message);
+	UE_LOG(LogWNT, Error, TEXT("%s failed. %s"), Context, *Message);
 }
+
+/** Maximum number of display modes to enumerate from EnumDisplaySettings before giving up. */
+static constexpr DWORD MaxEnumeratedModes = 2048;
 
 namespace WNTDisplay
 {
@@ -263,7 +267,7 @@ namespace WNTDisplay
 		DEVMODE DevMode = {};
 		DevMode.dmSize = sizeof(DEVMODE);
 
-		for (DWORD ModeIndex = 0; EnumDisplaySettings(*MonitorId, ModeIndex, &DevMode) && ModeIndex < 2048; ++ModeIndex)
+		for (DWORD ModeIndex = 0; EnumDisplaySettings(*MonitorId, ModeIndex, &DevMode) && ModeIndex < MaxEnumeratedModes; ++ModeIndex)
 		{
 			if (DevMode.dmBitsPerPel != 32)
 			{
@@ -290,12 +294,12 @@ namespace WNTDisplay
 	static TArray<FWNTDisplayMode> GetSupportedModes(const FString& MonitorId)
 	{
 		TArray<FWNTDisplayMode> Modes;
-		TSet<FString> UniqueKeys;
+		TSet<uint64> UniqueKeys;
 
 		DEVMODE DevMode = {};
 		DevMode.dmSize = sizeof(DEVMODE);
 
-		for (DWORD ModeIndex = 0; EnumDisplaySettings(*MonitorId, ModeIndex, &DevMode) && ModeIndex < 2048; ++ModeIndex)
+		for (DWORD ModeIndex = 0; EnumDisplaySettings(*MonitorId, ModeIndex, &DevMode) && ModeIndex < MaxEnumeratedModes; ++ModeIndex)
 		{
 			if (DevMode.dmBitsPerPel != 32)
 			{
@@ -310,13 +314,16 @@ namespace WNTDisplay
 				continue;
 			}
 
-			const FString Key = FString::Printf(TEXT("%d|%d|%d"), Width, Height, RefreshRate);
-			if (UniqueKeys.Contains(Key))
+			const uint64 Key = (static_cast<uint64>(static_cast<uint16>(Width)) << 48)
+				| (static_cast<uint64>(static_cast<uint16>(Height)) << 32)
+				| static_cast<uint64>(static_cast<uint32>(RefreshRate));
+
+			bool bAlreadyInSet = false;
+			UniqueKeys.Add(Key, &bAlreadyInSet);
+			if (bAlreadyInSet)
 			{
 				continue;
 			}
-
-			UniqueKeys.Add(Key);
 
 			FWNTDisplayMode Mode;
 			Mode.MonitorId = MonitorId;
@@ -527,7 +534,7 @@ bool URefreshRateFunctionLibrary::TestDisplayMode(const FString& MonitorId, FInt
 
 	return true;
 #else
-	UE_LOG(LogTemp, Error, TEXT("Error: Test Display Mode failed. Display mode control is only available on Windows."));
+	UE_LOG(LogWNT, Error, TEXT("Test Display Mode failed. Display mode control is only available on Windows."));
 	return false;
 #endif
 }
@@ -581,7 +588,7 @@ bool URefreshRateFunctionLibrary::ApplyDisplayMode(const FString& MonitorId, FIn
 
 	return true;
 #else
-	UE_LOG(LogTemp, Error, TEXT("Error: Apply Display Mode failed. Display mode control is only available on Windows."));
+	UE_LOG(LogWNT, Error, TEXT("Apply Display Mode failed. Display mode control is only available on Windows."));
 	return false;
 #endif
 }
@@ -669,7 +676,7 @@ bool URefreshRateFunctionLibrary::SetRefreshRate(int32 NewRefreshRate, const FSt
 
 	return ApplyDisplayMode(CurrentMode.MonitorId, CurrentMode.Resolution, NewRefreshRate, 0.0f);
 #else
-	UE_LOG(LogTemp, Error, TEXT("Error: Set Refresh Rate failed. Refresh rate control is only available on Windows."));
+	UE_LOG(LogWNT, Error, TEXT("Set Refresh Rate failed. Refresh rate control is only available on Windows."));
 	return false;
 #endif
 }

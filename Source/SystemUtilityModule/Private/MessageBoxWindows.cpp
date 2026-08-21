@@ -1,16 +1,16 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
 // -----------------------------------------------------
 
 #include "MessageBoxWindows.h"
+#include "SystemUtilityModule.h"
 #include "Async/Async.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Widgets/SWindow.h"
-#include <atomic>
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -80,7 +80,7 @@ namespace WNTMessageBox
             break;
         }
 #else
-        UE_LOG(LogTemp, Error, TEXT("Error: Show Native Message Box is only available on Windows."));
+        UE_LOG(LogWNT, Error, TEXT("Show Native Message Box is only available on Windows."));
 #endif
 
         return Result;
@@ -130,7 +130,7 @@ namespace WNTMessageBox
             Result = (PressedButtonId == 101) ? ECustomDialogResult::FirstButton : ECustomDialogResult::SecondButton;
         }
 #else
-        UE_LOG(LogTemp, Error, TEXT("Error: Show Regular Message Box is only available on Windows."));
+        UE_LOG(LogWNT, Error, TEXT("Show Regular Message Box is only available on Windows."));
 #endif
 
         return Result;

@@ -1,10 +1,11 @@
-﻿// -----------------------------------------------------
+// -----------------------------------------------------
 // Copyright   (c) 2025 AldertLake. All Rights Reserved.
 // GitHub:     https://github.com/AldertLake/
 // Discord:    https://discord.gg/QpPPfh6WVn
 // -----------------------------------------------------
 
 #include "HardwareInfoLibrary.h"
+#include "WNTPrivateUtils.h"
 #include "Async/Async.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -34,40 +35,8 @@
 using Microsoft::WRL::ComPtr;
 
 
-
-
-
 namespace WNT_Private
 {
-    static void LogSystemInfoError(const TCHAR* Context, const FString& Message)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Error: %s failed. %s"), Context, *Message);
-    }
-
-    struct FScopedComInit
-    {
-        HRESULT Result = E_FAIL;
-        bool bNeedsUninitialize = false;
-
-        FScopedComInit()
-        {
-            Result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-            bNeedsUninitialize = SUCCEEDED(Result);
-        }
-
-        ~FScopedComInit()
-        {
-            if (bNeedsUninitialize)
-            {
-                CoUninitialize();
-            }
-        }
-
-        bool IsUsable() const
-        {
-            return SUCCEEDED(Result) || Result == RPC_E_CHANGED_MODE;
-        }
-    };
 
     struct FWmiQueryRow
     {
@@ -146,8 +115,8 @@ namespace WNT_Private
 
     static bool EnsureWmiConnection(FWmiConnection& OutConnection, FString& OutError)
     {
-        static bool bSecurityInitialized = false;
-        static bool bSecurityAttempted = false;
+        static std::atomic<bool> bSecurityInitialized{false};
+        static std::atomic<bool> bSecurityAttempted{false};
 
         OutConnection.ComInit = MakeUnique<FScopedComInit>();
         if (!OutConnection.ComInit->IsUsable())
@@ -404,7 +373,8 @@ namespace WNT_Private
             return FString();
         }
 
-        const HDEVINFO DeviceInfoSet = SetupDiGetClassDevsW(nullptr, nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+        static const GUID GUID_DEVCLASS_DISPLAY = { 0x4d36e968, 0xe325, 0x11ce, { 0xbf, 0xc1, 0x08, 0x00, 0x2b, 0xe1, 0x03, 0x18 } };
+        const HDEVINFO DeviceInfoSet = SetupDiGetClassDevsW(&GUID_DEVCLASS_DISPLAY, nullptr, nullptr, DIGCF_PRESENT);
         if (DeviceInfoSet == INVALID_HANDLE_VALUE)
         {
             return FString();
@@ -474,14 +444,21 @@ namespace WNT_Private
             FAdapterEntry Entry;
             Entry.Desc = Desc;
             Entry.Index = CachedAdapters.Num();
-            Entry.bIsActiveRHI = (GRHIVendorId != 0 && Desc.VendorId == GRHIVendorId);
+
+            if (GRHIVendorId != 0 && Desc.VendorId == GRHIVendorId)
+            {
+                Entry.bIsActiveRHI = (GRHIDeviceId == 0 || Desc.DeviceId == GRHIDeviceId);
+            }
+            else
+            {
+                Entry.bIsActiveRHI = false;
+            }
 
             if (Entry.bIsActiveRHI) ActiveRHIIndex = Entry.Index;
             Adapter1.As(&Entry.Adapter);
             CachedAdapters.Add(MoveTemp(Entry));
             Adapter1.Reset();
         }
-
 
         if (CachedAdapters.Num() > 0 && ActiveRHIIndex >= CachedAdapters.Num())
             ActiveRHIIndex = 0;
@@ -830,14 +807,13 @@ namespace WNT_Command
         {
             if (OutResult)
             {
-                OutResult->StdErr = FString::Printf(TEXT("Windows error: %lu"), GetLastError());
+                OutResult->Error = FString::Printf(TEXT("Windows error: %lu"), GetLastError());
             }
             return false;
         }
 
         if (OutResult)
         {
-            OutResult->bStarted = true;
             if (ShellInfo.hProcess)
             {
                 WaitForSingleObject(ShellInfo.hProcess, INFINITE);
@@ -846,7 +822,6 @@ namespace WNT_Command
                 {
                     OutResult->ExitCode = static_cast<int32>(ExitCode);
                 }
-                OutResult->bCompleted = true;
                 CloseHandle(ShellInfo.hProcess);
             }
         }
@@ -859,7 +834,7 @@ namespace WNT_Command
 #else
         if (OutResult)
         {
-            OutResult->StdErr = TEXT("Elevated commands are only available on Windows.");
+            OutResult->Error = TEXT("Elevated commands are only available on Windows.");
         }
         return false;
 #endif
@@ -871,7 +846,7 @@ namespace WNT_Command
 
         if (Executable.IsEmpty() || Parameters.IsEmpty())
         {
-            Result.StdErr = TEXT("Command is empty or unsupported on this platform.");
+            Result.Error = TEXT("Command is empty or unsupported on this platform.");
             return Result;
         }
 
@@ -892,7 +867,7 @@ namespace WNT_Command
             {
                 FPlatformProcess::ClosePipe(StdErrReadPipe, StdErrWritePipe);
             }
-            Result.StdErr = TEXT("Failed to create output pipes.");
+            Result.Error = TEXT("Failed to create output pipes.");
             return Result;
         }
 
@@ -914,20 +889,20 @@ namespace WNT_Command
         {
             FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
             FPlatformProcess::ClosePipe(StdErrReadPipe, StdErrWritePipe);
-            Result.StdErr = TEXT("Failed to start command process.");
+            Result.Error = TEXT("Failed to start command process.");
             return Result;
         }
 
-        Result.bStarted = true;
+        bool bProcessTimedOut = false;
         const double StartTime = FPlatformTime::Seconds();
         while (FPlatformProcess::IsProcRunning(ProcHandle))
         {
-            Result.StdOut += FPlatformProcess::ReadPipe(ReadPipe);
-            Result.StdErr += FPlatformProcess::ReadPipe(StdErrReadPipe);
+            Result.TextOutput += FPlatformProcess::ReadPipe(ReadPipe);
+            Result.Error += FPlatformProcess::ReadPipe(StdErrReadPipe);
 
             if (Options.TimeoutSeconds > 0.0f && (FPlatformTime::Seconds() - StartTime) >= Options.TimeoutSeconds)
             {
-                Result.bTimedOut = true;
+                bProcessTimedOut = true;
                 FPlatformProcess::TerminateProc(ProcHandle, true);
                 break;
             }
@@ -935,21 +910,28 @@ namespace WNT_Command
             FPlatformProcess::Sleep(0.02f);
         }
 
-        Result.StdOut += FPlatformProcess::ReadPipe(ReadPipe);
-        Result.StdErr += FPlatformProcess::ReadPipe(StdErrReadPipe);
+        Result.TextOutput += FPlatformProcess::ReadPipe(ReadPipe);
+        Result.Error += FPlatformProcess::ReadPipe(StdErrReadPipe);
 
-        if (!Result.bTimedOut)
+        if (!bProcessTimedOut)
         {
             int32 ReturnCode = -1;
             if (FPlatformProcess::GetProcReturnCode(ProcHandle, &ReturnCode))
             {
                 Result.ExitCode = ReturnCode;
             }
-            Result.bCompleted = true;
         }
         else
         {
-            Result.StdErr = TEXT("Command timed out and was terminated.");
+            const FString TimeoutMsg = TEXT("Command timed out and was terminated.");
+            if (!Result.Error.IsEmpty())
+            {
+                Result.Error = FString::Printf(TEXT("%s\n%s"), *TimeoutMsg, *Result.Error);
+            }
+            else
+            {
+                Result.Error = TimeoutMsg;
+            }
         }
 
         FPlatformProcess::CloseProc(ProcHandle);
@@ -964,7 +946,7 @@ namespace WNT_Command
         const FString TrimmedCommand = Command.TrimStartAndEnd();
         if (TrimmedCommand.IsEmpty())
         {
-            Result.StdErr = TEXT("Command is empty.");
+            Result.Error = TEXT("Command is empty.");
             return Result;
         }
 
@@ -972,7 +954,7 @@ namespace WNT_Command
         const FString Parameters = BuildShellParameters(Options.Shell, TrimmedCommand);
         if (Executable.IsEmpty())
         {
-            Result.StdErr = TEXT("Command execution is only available on Windows.");
+            Result.Error = TEXT("Command execution is only available on Windows.");
             return Result;
         }
 
@@ -980,7 +962,7 @@ namespace WNT_Command
         {
             if (Options.bCaptureOutput)
             {
-                Result.StdErr = TEXT("Output capture is not available for elevated commands launched through UAC.");
+                Result.Error = TEXT("Output capture is not available for elevated commands launched through UAC.");
             }
             StartElevated(Executable, Parameters, Options.bHidden, Options.WorkingDirectory, &Result);
             return Result;
@@ -1003,16 +985,14 @@ namespace WNT_Command
             Options.WorkingDirectory.IsEmpty() ? nullptr : *Options.WorkingDirectory,
             nullptr);
 
-        Result.bStarted = Handle.IsValid();
-        Result.bCompleted = Result.bStarted;
-        Result.ExitCode = Result.bStarted ? 0 : -1;
+        Result.ExitCode = Handle.IsValid() ? 0 : -1;
         if (Handle.IsValid())
         {
             FPlatformProcess::CloseProc(Handle);
         }
         else
         {
-            Result.StdErr = TEXT("Failed to start command process.");
+            Result.Error = TEXT("Failed to start command process.");
         }
 
         return Result;
@@ -1047,11 +1027,11 @@ void UAsyncRunCommandAction::Activate()
     Async(EAsyncExecution::Thread, [WeakThis, CommandCopy, OptionsCopy]()
     {
         const FWNTCommandResult Result = WNT_Command::RunCommand(CommandCopy, OptionsCopy);
-        const bool bSucceeded = Result.bStarted && !Result.bTimedOut && (Result.ExitCode == 0 || !Result.bCompleted);
+        const bool bSucceeded = (Result.ExitCode == 0);
 
-        if (!bSucceeded && !Result.StdErr.IsEmpty())
+        if (!bSucceeded && !Result.Error.IsEmpty())
         {
-            WNT_Private::LogSystemInfoError(TEXT("Run Command Async"), Result.StdErr);
+            WNT_Private::LogWntError(TEXT("Run Command Async"), Result.Error);
         }
 
         AsyncTask(ENamedThreads::GameThread, [WeakThis, Result, bSucceeded]()
@@ -1256,7 +1236,7 @@ float USystemInfoBPLibrary::GetCPUThreadUsage(int32 Thread)
     FString ErrorMessage;
     if (!WNT_Private::EnsureCpuThreadCounter(Thread, ErrorMessage))
     {
-        WNT_Private::LogSystemInfoError(TEXT("Get CPU Thread Usage"), ErrorMessage);
+        WNT_Private::LogWntError(TEXT("Get CPU Thread Usage"), ErrorMessage);
         return 0.0f;
     }
 
@@ -1323,7 +1303,7 @@ TArray<FGPUAdapterInfo> USystemInfoBPLibrary::GetAllGPUAdapters()
     return Result;
 }
 
-FGPUAdapterInfo USystemInfoBPLibrary::GetGPUInformations(int32 Adapter)
+FGPUAdapterInfo USystemInfoBPLibrary::GetGPUInformation(int32 Adapter)
 {
     FGPUAdapterInfo Result;
 #if PLATFORM_WINDOWS
@@ -1333,10 +1313,10 @@ FGPUAdapterInfo USystemInfoBPLibrary::GetGPUInformations(int32 Adapter)
     }
     else
     {
-        WNT_Private::LogSystemInfoError(TEXT("Get GPU Information"), TEXT("GPU adapter index is invalid."));
+        WNT_Private::LogWntError(TEXT("Get GPU Information"), TEXT("GPU adapter index is invalid."));
     }
 #else
-    WNT_Private::LogSystemInfoError(TEXT("Get GPU Information"), TEXT("GPU runtime information is only available on Windows."));
+    WNT_Private::LogWntError(TEXT("Get GPU Information"), TEXT("GPU runtime information is only available on Windows."));
 #endif
     return Result;
 }
@@ -1364,9 +1344,6 @@ EGPUVendor USystemInfoBPLibrary::GetGPUManufacturer(int32 Adapter)
 }
 
 
-
-
-
 int64 USystemInfoBPLibrary::GetTotalDedicatedVRAM(int32 Adapter)
 {
 #if PLATFORM_WINDOWS
@@ -1381,11 +1358,11 @@ int64 USystemInfoBPLibrary::GetTotalDedicatedVRAM(int32 Adapter)
 int64 USystemInfoBPLibrary::GetUsedDedicatedVRAM(int32 Adapter)
 {
 #if PLATFORM_WINDOWS
-    FScopeLock Lock(&WNT_Private::PerfMutex);
-    if (!WNT_Private::InitPerfCounters()) return 0;
-
     auto* Entry = WNT_Private::GetAdapter(Adapter);
     if (!Entry) return 0;
+
+    FScopeLock Lock(&WNT_Private::PerfMutex);
+    if (!WNT_Private::InitPerfCounters()) return 0;
 
     WNT_Private::CollectPerfData();
     const FString LuidStr = WNT_Private::FormatLUID(Entry->Desc.AdapterLuid);
@@ -1394,9 +1371,6 @@ int64 USystemInfoBPLibrary::GetUsedDedicatedVRAM(int32 Adapter)
     return 0;
 #endif
 }
-
-
-
 
 
 int64 USystemInfoBPLibrary::GetTotalVirtualVRAM(int32 Adapter)
@@ -1413,11 +1387,11 @@ int64 USystemInfoBPLibrary::GetTotalVirtualVRAM(int32 Adapter)
 int64 USystemInfoBPLibrary::GetUsedVirtualVRAM(int32 Adapter)
 {
 #if PLATFORM_WINDOWS
-    FScopeLock Lock(&WNT_Private::PerfMutex);
-    if (!WNT_Private::InitPerfCounters()) return 0;
-
     auto* Entry = WNT_Private::GetAdapter(Adapter);
     if (!Entry) return 0;
+
+    FScopeLock Lock(&WNT_Private::PerfMutex);
+    if (!WNT_Private::InitPerfCounters()) return 0;
 
     WNT_Private::CollectPerfData();
     const FString LuidStr = WNT_Private::FormatLUID(Entry->Desc.AdapterLuid);
@@ -1426,9 +1400,6 @@ int64 USystemInfoBPLibrary::GetUsedVirtualVRAM(int32 Adapter)
     return 0;
 #endif
 }
-
-
-
 
 
 int64 USystemInfoBPLibrary::GetGameVRAMUsage()
@@ -1448,17 +1419,14 @@ int64 USystemInfoBPLibrary::GetGameVRAMUsage()
 }
 
 
-
-
-
 float USystemInfoBPLibrary::GetGPUUsagePercent(int32 Adapter, EGPUUsageMode UsageMode)
 {
 #if PLATFORM_WINDOWS
-    FScopeLock Lock(&WNT_Private::PerfMutex);
-    if (!WNT_Private::InitPerfCounters()) return 0.0f;
-
     auto* Entry = WNT_Private::GetAdapter(Adapter);
     if (!Entry) return 0.0f;
+
+    FScopeLock Lock(&WNT_Private::PerfMutex);
+    if (!WNT_Private::InitPerfCounters()) return 0.0f;
 
     WNT_Private::CollectPerfData();
     const FString LuidStr = WNT_Private::FormatLUID(Entry->Desc.AdapterLuid);
@@ -1467,9 +1435,6 @@ float USystemInfoBPLibrary::GetGPUUsagePercent(int32 Adapter, EGPUUsageMode Usag
     return 0.0f;
 #endif
 }
-
-
-
 
 
 void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse)
@@ -1498,9 +1463,6 @@ void USystemInfoBPLibrary::GetInputDevices(bool& HasGamepad, bool& HasMouse)
     }
 #endif
 }
-
-
-
 
 
 EGraphicsRHI USystemInfoBPLibrary::GetRHIName()
@@ -1595,11 +1557,12 @@ bool USystemInfoBPLibrary::ExecuteWindowsCMD(const FString& Command, bool bRunAs
     Options.bHidden = bHidden;
     Options.bCaptureOutput = false;
     const FWNTCommandResult Result = WNT_Command::RunCommand(Command, Options);
-    if (!Result.bStarted && !Result.StdErr.IsEmpty())
+    const bool bSucceeded = (Result.ExitCode == 0);
+    if (!bSucceeded && !Result.Error.IsEmpty())
     {
-        WNT_Private::LogSystemInfoError(TEXT("Run Command Prompt Command"), Result.StdErr);
+        WNT_Private::LogWntError(TEXT("Run Command Prompt Command"), Result.Error);
     }
-    return Result.bStarted;
+    return bSucceeded;
 }
 
 bool USystemInfoBPLibrary::ExecutePowerShell(const FString& Command, bool bRunAsAdmin, bool bHidden)
@@ -1610,11 +1573,12 @@ bool USystemInfoBPLibrary::ExecutePowerShell(const FString& Command, bool bRunAs
     Options.bHidden = bHidden;
     Options.bCaptureOutput = false;
     const FWNTCommandResult Result = WNT_Command::RunCommand(Command, Options);
-    if (!Result.bStarted && !Result.StdErr.IsEmpty())
+    const bool bSucceeded = (Result.ExitCode == 0);
+    if (!bSucceeded && !Result.Error.IsEmpty())
     {
-        WNT_Private::LogSystemInfoError(TEXT("Run PowerShell Command"), Result.StdErr);
+        WNT_Private::LogWntError(TEXT("Run PowerShell Command"), Result.Error);
     }
-    return Result.bStarted;
+    return bSucceeded;
 }
 
 bool USystemInfoBPLibrary::CanForceKillGame()
@@ -1645,5 +1609,3 @@ void USystemInfoBPLibrary::ForceKillGame()
     FPlatformMisc::RequestExit(true);
 #endif
 }
-
-
